@@ -2001,6 +2001,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"fmt
 
 	"github.com/googleapis/mcp-toolbox-sdk-go/core"
 	openai "github.com/openai/openai-go"
@@ -2130,7 +2131,7 @@ func main() {
 
 		params.Messages = append(params.Messages, openai.AssistantMessage(query))
 
-		println("\n", completion.Choices[0].Message.Content)
+		fmt.println("\n", completion.Choices[0].Message.Content)
 
 	}
 
@@ -2425,6 +2426,11 @@ etc., you could use environment variables instead with the format `${ENV_NAME}`.
 ```yaml
   user: ${USER_NAME}
   password: ${PASSWORD}
+```
+A default value can be specified like `${ENV_NAME:default}`.
+
+```yaml
+  port: ${DB_PORT:3306}
 ```
 
 ### Sources
@@ -3724,6 +3730,8 @@ to expose your developer assistant tools to a Postgres instance:
 * [Cline][cline]  (VS Code extension)
 * [Claude desktop][claudedesktop]
 * [Claude code][claudecode]
+* [Gemini CLI][geminicli]
+* [Gemini Code Assist][geminicodeassist]
 
 [toolbox]: https://github.com/googleapis/genai-toolbox
 [cursor]: #configure-your-mcp-client
@@ -3732,6 +3740,8 @@ to expose your developer assistant tools to a Postgres instance:
 [cline]: #configure-your-mcp-client
 [claudedesktop]: #configure-your-mcp-client
 [claudecode]: #configure-your-mcp-client
+[geminicli]: #configure-your-mcp-client
+[geminicodeassist]: #configure-your-mcp-client
 
 {{< notice tip >}}
 This guide can be used with [AlloyDB
@@ -3965,6 +3975,57 @@ curl -O https://storage.googleapis.com/genai-toolbox/v0.12.0/windows/amd64/toolb
 
     ```
 
+{{% /tab %}}
+
+{{% tab header="Gemini CLI" lang="en" %}}
+
+1.  Install the [Gemini CLI](https://github.com/google-gemini/gemini-cli?tab=readme-ov-file#quickstart).
+1.  In your working directory, create a folder named `.gemini`. Within it, create a `settings.json` file.
+1.  Add the following configuration, replace the environment variables with your values, and then save:
+
+    ```json
+    {
+      "mcpServers": {
+        "postgres": {
+          "command": "./PATH/TO/toolbox",
+          "args": ["--prebuilt","postgres","--stdio"],
+          "env": {
+            "POSTGRES_HOST": "",
+            "POSTGRES_PORT": "",
+            "POSTGRES_DATABASE": "",
+            "POSTGRES_USER": "",
+            "POSTGRES_PASSWORD": ""
+          }
+        }
+      }
+    }
+    ```
+{{% /tab %}}
+
+{{% tab header="Gemini Code Assist" lang="en" %}}
+
+1.  Install the [Gemini Code Assist](https://marketplace.visualstudio.com/items?itemName=Google.geminicodeassist) extension in Visual Studio Code.
+1.  Enable Agent Mode in Gemini Code Assist chat.
+1.  In your working directory, create a folder named `.gemini`. Within it, create a `settings.json` file.
+1.  Add the following configuration, replace the environment variables with your values, and then save:
+
+    ```json
+    {
+      "mcpServers": {
+        "postgres": {
+          "command": "./PATH/TO/toolbox",
+          "args": ["--prebuilt","postgres","--stdio"],
+          "env": {
+            "POSTGRES_HOST": "",
+            "POSTGRES_PORT": "",
+            "POSTGRES_DATABASE": "",
+            "POSTGRES_USER": "",
+            "POSTGRES_PASSWORD": ""
+          }
+        }
+      }
+    }
+    ```
 {{% /tab %}}
 {{< /tabpane >}}
 
@@ -5866,22 +5927,39 @@ Connect your IDE to BigQuery using Toolbox.
 
 BigQuery uses [Identity and Access Management (IAM)][iam-overview] to control
 user and group access to BigQuery resources like projects, datasets, and tables.
-Toolbox will use your [Application Default Credentials (ADC)][adc] to authorize
-and authenticate when interacting with [BigQuery][bigquery-docs].
 
-In addition to [setting the ADC for your server][set-adc], you need to ensure
-the IAM identity has been given the correct IAM permissions for the queries
-you intend to run. Common roles include `roles/bigquery.user` (which includes
-permissions to run jobs and read data) or `roles/bigquery.dataViewer`. See
-[Introduction to BigQuery IAM][grant-permissions] for more information on
-applying IAM permissions and roles to an identity.
+### Authentication via Application Default Credentials (ADC)
+
+By **default**, Toolbox will use your [Application Default Credentials (ADC)][adc] to authorize and authenticate when interacting with [BigQuery][bigquery-docs].
+
+When using this method, you need to ensure the IAM identity associated with your
+ADC (such as a service account) has the correct permissions for the queries you
+intend to run. Common roles include `roles/bigquery.user` (which includes
+permissions to run jobs and read data) or `roles/bigbigquery.dataViewer`.
+Follow this [guide][set-adc] to set up your ADC.
+
+### Authentication via User's OAuth Access Token
+
+If the `useClientOAuth` parameter is set to `true`, Toolbox will instead use the
+OAuth access token for authentication. This token is parsed from the
+`Authorization` header passed in with the tool invocation request. This method
+allows Toolbox to make queries to [BigQuery][bigquery-docs] on behalf of the
+client or the end-user.
+
+When using this on-behalf-of authentication, you must ensure that the
+identity used has been granted the correct IAM permissions. Currently,
+this option is only supported by the following BigQuery tools:
+
+- [`bigquery-sql`](../tools/bigquery/bigquery-sql.md)  
+  Run SQL queries directly against BigQuery datasets.
 
 [iam-overview]: https://cloud.google.com/bigquery/docs/access-control
 [adc]: https://cloud.google.com/docs/authentication#adc
 [set-adc]: https://cloud.google.com/docs/authentication/provide-credentials-adc
-[grant-permissions]: https://cloud.google.com/bigquery/docs/access-control
 
 ## Example
+
+Initialize a BigQuery source that uses ADC:
 
 ```yaml
 sources:
@@ -5890,13 +5968,24 @@ sources:
     project: "my-project-id"
 ```
 
+Initialize a BigQuery source that uses the client's access token:
+
+```yaml
+sources:
+  my-bigquery-client-auth-source:
+    kind: "bigquery"
+    project: "my-project-id"
+    useClientOAuth: true
+```
+
 ## Reference
 
-| **field** | **type** | **required** | **description**                                                               |
-|-----------|:--------:|:------------:|-------------------------------------------------------------------------------|
-| kind      |  string  |     true     | Must be "bigquery".                                                           |
-| project   |  string  |     true     | Id of the GCP project that the cluster was created in (e.g. "my-project-id"). |
-| location  |  string  |    false     | Specifies the location (e.g., 'us', 'asia-northeast1') in which to run the query job. This location must match the location of any tables referenced in the query. The default behavior is for it to be executed in the US multi-region |
+| **field**      | **type** | **required** | **description**                                                                                                                                                                                                                         |
+|----------------|:--------:|:------------:|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| kind           |  string  |     true     | Must be "bigquery".                                                                                                                                                                                                                     |
+| project        |  string  |     true     | Id of the GCP project that the cluster was created in (e.g. "my-project-id").                                                                                                                                                           |
+| location       |  string  |    false     | Specifies the location (e.g., 'us', 'asia-northeast1') in which to run the query job. This location must match the location of any tables referenced in the query. The default behavior is for it to be executed in the US multi-region |
+| useClientOAuth |   bool   |    false     | If true, forwards the client's OAuth access token from the "Authorization" header to downstream queries.                                                                                                                                |
 
 
 # Bigtable
@@ -7004,14 +7093,17 @@ instead of hardcoding your secrets into the configuration file.
 
 ## Reference
 
-| **field**     | **type** | **required** | **description**                                                                           |
-| ------------- | :------: | :----------: | ----------------------------------------------------------------------------------------- |
-| kind          |  string  |     true     | Must be "looker".                                                                         |
-| base_url      |  string  |     true     | The URL of your Looker server with no trailing /).                                        |
-| client_id     |  string  |     true     | The client id assigned by Looker.                                                         |
-| client_secret |  string  |     true     | The client secret assigned by Looker.                                                     |
-| verify_ssl    |  string  |     true     | Whether to check the ssl certificate of the server.                                       |
-| timeout       |  string  |    false     | Maximum time to wait for query execution (e.g. "30s", "2m"). By default, 120s is applied. |
+| **field**            | **type** | **required** | **description**                                                                           |
+| -------------------- | :------: | :----------: | ----------------------------------------------------------------------------------------- |
+| kind                 |  string  |     true     | Must be "looker".                                                                         |
+| base_url             |  string  |     true     | The URL of your Looker server with no trailing /).                                        |
+| client_id            |  string  |     true     | The client id assigned by Looker.                                                         |
+| client_secret        |  string  |     true     | The client secret assigned by Looker.                                                     |
+| verify_ssl           |  string  |     true     | Whether to check the ssl certificate of the server.                                       |
+| timeout              |  string  |    false     | Maximum time to wait for query execution (e.g. "30s", "2m"). By default, 120s is applied. |
+| show_hidden_models   |  string  |    false     | Show or hide hidden models. (default: true)                                               |
+| show_hidden_explores |  string  |    false     | Show or hide hidden explores. (default: true)                                             |
+| show_hidden_fields   |  string  |    false     | Show or hide hidden fields. (default: true)                                               |
 
 
 # MongoDB
@@ -7032,6 +7124,7 @@ sources:
     my-mongodb:
         kind: mongodb
         uri: "mongodb+srv://username:password@host.mongodb.net"       
+
 ```
 
 ## Reference
@@ -7040,7 +7133,6 @@ sources:
 |-----------|:--------:|:------------:|-------------------------------------------------------------------|
 | kind      |  string  |     true     | Must be "mongodb".                                                |
 | uri       |  string  |     true     | connection string to connect to MongoDB                           |
-| database  |  string  |     true     | Name of the mongodb database to connect to (e.g. "sample_mflix"). |
 
 
 # MySQL
@@ -9954,8 +10046,11 @@ See guides, [Connect from your IDE](../how-to/connect-ide/_index.md), for detail
     *   **BigQuery User** (`roles/bigquery.user`) to execute queries and view metadata.
     *   **BigQuery Metadata Viewer** (`roles/bigquery.metadataViewer`) to view all datasets.
     *   **BigQuery Data Editor** (`roles/bigquery.dataEditor`) to create or modify datasets and tables.
+    *   **Gemini for Google Cloud** (`roles/cloudaicompanion.user`) to use the conversational analytics API.
 *   **Tools:**
+    *   `ask_data_insights`: Use this tool to perform data analysis, get insights, or answer complex questions about the contents of specific BigQuery tables. For more information on required roles, API setup, and IAM configuration, see the setup and authentication section of the [Conversational Analytics API documentation](https://cloud.google.com/gemini/docs/conversational-analytics-api/overview).
     *   `execute_sql`: Executes a SQL statement.
+    *   `forecast`: Use this tool to forecast time series data.
     *   `get_dataset_info`: Gets dataset metadata.
     *   `get_table_info`: Gets table metadata.
     *   `list_dataset_ids`: Lists datasets.
