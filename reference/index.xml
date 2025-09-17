@@ -136,6 +136,12 @@
 &lt;ul>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL query.&lt;/li>
 &lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
+&lt;li>&lt;code>list_autovacuum_configurations&lt;/code>: Lists autovacuum configurations in the database.&lt;/li>
+&lt;li>&lt;code>list_memory_configurations&lt;/code>: Lists memory-related configurations in the database.&lt;/li>
+&lt;li>&lt;code>list_top_bloated_tables&lt;/code>: List top bloated tables in the database.&lt;/li>
+&lt;li>&lt;code>list_replication_slots&lt;/code>: Lists replication slots in the database.&lt;/li>
+&lt;li>&lt;code>list_invalid_indexes&lt;/code>: Lists invalid indexes in the database.&lt;/li>
+&lt;li>&lt;code>get_query_plan&lt;/code>: Generate the execution plan of a statement.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -164,6 +170,21 @@
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
+&lt;h2 id="alloydb-postgres-observability">AlloyDB Postgres Observability&lt;/h2>
+&lt;ul>
+&lt;li>&lt;code>--prebuilt&lt;/code> value: &lt;code>alloydb-postgres-observability&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Permissions:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;strong>Monitoring Viewer&lt;/strong> (&lt;code>roles/monitoring.viewer&lt;/code>) is required on the project to view monitoring data.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Tools:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>get_system_metrics&lt;/code>: Fetches system level cloud monitoring data (timeseries metrics) for an AlloyDB instance using a PromQL query.&lt;/li>
+&lt;li>&lt;code>get_query_metrics&lt;/code>: Fetches query level cloud monitoring data (timeseries metrics) for queries running in an AlloyDB instance using a PromQL query.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
 &lt;h2 id="bigquery">BigQuery&lt;/h2>
 &lt;ul>
 &lt;li>&lt;code>--prebuilt&lt;/code> value: &lt;code>bigquery&lt;/code>&lt;/li>
@@ -183,6 +204,7 @@
 &lt;/li>
 &lt;li>&lt;strong>Tools:&lt;/strong>
 &lt;ul>
+&lt;li>&lt;code>analyze_contribution&lt;/code>: Use this tool to perform contribution analysis, also called key driver analysis.&lt;/li>
 &lt;li>&lt;code>ask_data_insights&lt;/code>: Use this tool to perform data analysis, get insights, or answer complex questions about the contents of specific BigQuery tables. For more information on required roles, API setup, and IAM configuration, see the setup and authentication section of the &lt;a href="https://cloud.google.com/gemini/docs/conversational-analytics-api/overview">Conversational Analytics API documentation&lt;/a>.&lt;/li>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL statement.&lt;/li>
 &lt;li>&lt;code>forecast&lt;/code>: Use this tool to forecast time series data.&lt;/li>
@@ -190,6 +212,7 @@
 &lt;li>&lt;code>get_table_info&lt;/code>: Gets table metadata.&lt;/li>
 &lt;li>&lt;code>list_dataset_ids&lt;/code>: Lists datasets.&lt;/li>
 &lt;li>&lt;code>list_table_ids&lt;/code>: Lists tables.&lt;/li>
+&lt;li>&lt;code>search_catalog&lt;/code>: Search for entries based on the provided query.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -218,6 +241,22 @@ or &amp;ldquo;Private&amp;rdquo; (Default: Public).&lt;/li>
 &lt;ul>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL query.&lt;/li>
 &lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
+&lt;li>&lt;code>get_query_plan&lt;/code>: Provides information about how MySQL executes a SQL statement.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;h2 id="cloud-sql-for-mysql-observability">Cloud SQL for MySQL Observability&lt;/h2>
+&lt;ul>
+&lt;li>&lt;code>--prebuilt&lt;/code> value: &lt;code>cloud-sql-mysql-observability&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Permissions:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;strong>Monitoring Viewer&lt;/strong> (&lt;code>roles/monitoring.viewer&lt;/code>) is required on the project to view monitoring data.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Tools:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>get_system_metrics&lt;/code>: Fetches system level cloud monitoring data (timeseries metrics) for a MySQL instance using a PromQL query.&lt;/li>
+&lt;li>&lt;code>get_query_metrics&lt;/code>: Fetches query level cloud monitoring data (timeseries metrics) for queries running in a MySQL instance using a PromQL query.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -245,6 +284,27 @@ or &amp;ldquo;Private&amp;rdquo; (Default: Public).&lt;/li>
 &lt;ul>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL query.&lt;/li>
 &lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
+&lt;li>&lt;code>list_autovacuum_configurations&lt;/code>: Lists autovacuum configurations in the database.&lt;/li>
+&lt;li>&lt;code>list_memory_configurations&lt;/code>: Lists memory-related configurations in the database.&lt;/li>
+&lt;li>&lt;code>list_top_bloated_tables&lt;/code>: List top bloated tables in the database.&lt;/li>
+&lt;li>&lt;code>list_replication_slots&lt;/code>: Lists replication slots in the database.&lt;/li>
+&lt;li>&lt;code>list_invalid_indexes&lt;/code>: Lists invalid indexes in the database.&lt;/li>
+&lt;li>&lt;code>get_query_plan&lt;/code>: Generate the execution plan of a statement.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;h2 id="cloud-sql-for-postgresql-observability">Cloud SQL for PostgreSQL Observability&lt;/h2>
+&lt;ul>
+&lt;li>&lt;code>--prebuilt&lt;/code> value: &lt;code>cloud-sql-postgres-observability&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Permissions:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;strong>Monitoring Viewer&lt;/strong> (&lt;code>roles/monitoring.viewer&lt;/code>) is required on the project to view monitoring data.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Tools:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>get_system_metrics&lt;/code>: Fetches system level cloud monitoring data (timeseries metrics) for a Postgres instance using a PromQL query.&lt;/li>
+&lt;li>&lt;code>get_query_metrics&lt;/code>: Fetches query level cloud monitoring data (timeseries metrics) for queries running in Postgres instance using a PromQL query.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -273,6 +333,20 @@ or &amp;ldquo;Private&amp;rdquo; (Default: Public).&lt;/li>
 &lt;ul>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL query.&lt;/li>
 &lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;h2 id="cloud-sql-for-sql-server-observability">Cloud SQL for SQL Server Observability&lt;/h2>
+&lt;ul>
+&lt;li>&lt;code>--prebuilt&lt;/code> value: &lt;code>cloud-sql-mssql-observability&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Permissions:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;strong>Monitoring Viewer&lt;/strong> (&lt;code>roles/monitoring.viewer&lt;/code>) is required on the project to view monitoring data.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Tools:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>get_system_metrics&lt;/code>: Fetches system level cloud monitoring data (timeseries metrics) for a SQL Server instance using a PromQL query.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -405,6 +479,7 @@ or &amp;ldquo;Private&amp;rdquo; (Default: Public).&lt;/li>
 &lt;ul>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL query.&lt;/li>
 &lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
+&lt;li>&lt;code>get_query_plan&lt;/code>: Provides information about how MySQL executes a SQL statement.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -454,6 +529,12 @@ or &amp;ldquo;Private&amp;rdquo; (Default: Public).&lt;/li>
 &lt;ul>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL query.&lt;/li>
 &lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
+&lt;li>&lt;code>list_autovacuum_configurations&lt;/code>: Lists autovacuum configurations in the database.&lt;/li>
+&lt;li>&lt;code>list_memory_configurations&lt;/code>: Lists memory-related configurations in the database.&lt;/li>
+&lt;li>&lt;code>list_top_bloated_tables&lt;/code>: List top bloated tables in the database.&lt;/li>
+&lt;li>&lt;code>list_replication_slots&lt;/code>: Lists replication slots in the database.&lt;/li>
+&lt;li>&lt;code>list_invalid_indexes&lt;/code>: Lists invalid indexes in the database.&lt;/li>
+&lt;li>&lt;code>get_query_plan&lt;/code>: Generate the execution plan of a statement.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -501,6 +582,26 @@ or &amp;ldquo;Private&amp;rdquo; (Default: Public).&lt;/li>
 &lt;ul>
 &lt;li>&lt;code>execute_sql&lt;/code>: Executes a DML SQL query using the PostgreSQL interface for Spanner.&lt;/li>
 &lt;li>&lt;code>execute_sql_dql&lt;/code>: Executes a DQL SQL query using the PostgreSQL interface for Spanner.&lt;/li>
+&lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;h2 id="sqlite">SQLite&lt;/h2>
+&lt;ul>
+&lt;li>&lt;code>--prebuilt&lt;/code> value: &lt;code>sqlite&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Environment Variables:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>SQLITE_DATABASE&lt;/code>: The path to the SQLite database file (e.g., &lt;code>./sample.db&lt;/code>).&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Permissions:&lt;/strong>
+&lt;ul>
+&lt;li>File system read/write permissions for the specified database file.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Tools:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>execute_sql&lt;/code>: Executes a SQL query.&lt;/li>
 &lt;li>&lt;code>list_tables&lt;/code>: Lists tables in the database.&lt;/li>
 &lt;/ul>
 &lt;/li>
