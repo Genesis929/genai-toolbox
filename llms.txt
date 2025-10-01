@@ -90,6 +90,7 @@ List of reference documentation for resources in Toolbox.
   - [Cloud Monitoring](https://Genesis929.github.io/genai-toolbox/resources/tools/cloudmonitoring/): Tools that work with Cloud Monitoring source.
   - [Cloud SQL](https://Genesis929.github.io/genai-toolbox/resources/tools/cloudsql/): Tools that work with Cloud SQL. 
   - [Couchbase](https://Genesis929.github.io/genai-toolbox/resources/tools/couchbase/): Tools that work with Couchbase Sources.
+  - [Dataform](https://Genesis929.github.io/genai-toolbox/resources/tools/dataform/): Tools that work with Dataform.
   - [Dataplex](https://Genesis929.github.io/genai-toolbox/resources/tools/dataplex/): Tools that work with Dataplex Sources.
   - [Dgraph](https://Genesis929.github.io/genai-toolbox/resources/tools/dgraph/): Tools that work with Dgraph Sources.
   - [Firebird](https://Genesis929.github.io/genai-toolbox/resources/tools/firebird/): Tools that work with Firebird Sources.
