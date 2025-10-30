@@ -151,6 +151,8 @@ database.&lt;/li>
 &lt;li>&lt;code>list_replication_slots&lt;/code>: Lists replication slots in the database.&lt;/li>
 &lt;li>&lt;code>list_invalid_indexes&lt;/code>: Lists invalid indexes in the database.&lt;/li>
 &lt;li>&lt;code>get_query_plan&lt;/code>: Generate the execution plan of a statement.&lt;/li>
+&lt;li>&lt;code>list_views&lt;/code>: Lists views in the database from pg_views with a default
+limit of 50 rows. Returns schemaname, viewname and the ownername.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -378,6 +380,8 @@ database.&lt;/li>
 &lt;li>&lt;code>list_replication_slots&lt;/code>: Lists replication slots in the database.&lt;/li>
 &lt;li>&lt;code>list_invalid_indexes&lt;/code>: Lists invalid indexes in the database.&lt;/li>
 &lt;li>&lt;code>get_query_plan&lt;/code>: Generate the execution plan of a statement.&lt;/li>
+&lt;li>&lt;code>list_views&lt;/code>: Lists views in the database from pg_views with a default
+limit of 50 rows. Returns schemaname, viewname and the ownername.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
@@ -783,6 +787,31 @@ database.&lt;/li>
 &lt;li>&lt;code>list_replication_slots&lt;/code>: Lists replication slots in the database.&lt;/li>
 &lt;li>&lt;code>list_invalid_indexes&lt;/code>: Lists invalid indexes in the database.&lt;/li>
 &lt;li>&lt;code>get_query_plan&lt;/code>: Generate the execution plan of a statement.&lt;/li>
+&lt;li>&lt;code>list_views&lt;/code>: Lists views in the database from pg_views with a default
+limit of 50 rows. Returns schemaname, viewname and the ownername.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;/ul>
+&lt;h2 id="google-cloud-serverless-for-apache-spark">Google Cloud Serverless for Apache Spark&lt;/h2>
+&lt;ul>
+&lt;li>&lt;code>--prebuilt&lt;/code> value: &lt;code>serverless-spark&lt;/code>&lt;/li>
+&lt;li>&lt;strong>Environment Variables:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>SERVERLESS_SPARK_PROJECT&lt;/code>: The GCP project ID&lt;/li>
+&lt;li>&lt;code>SERVERLESS_SPARK_LOCATION&lt;/code>: The GCP Location.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Permissions:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;strong>Dataproc Serverless Viewer&lt;/strong> (&lt;code>roles/dataproc.serverlessViewer&lt;/code>) to
+view serverless batches.&lt;/li>
+&lt;li>&lt;strong>Dataproc Serverless Editor&lt;/strong> (&lt;code>roles/dataproc.serverlessEditor&lt;/code>) to
+view serverless batches.&lt;/li>
+&lt;/ul>
+&lt;/li>
+&lt;li>&lt;strong>Tools:&lt;/strong>
+&lt;ul>
+&lt;li>&lt;code>list_batches&lt;/code>: Lists Spark batches.&lt;/li>
 &lt;/ul>
 &lt;/li>
 &lt;/ul>
