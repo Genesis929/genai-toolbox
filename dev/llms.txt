@@ -11,6 +11,7 @@ How to get started with Toolbox.
 - [Python Quickstart (Local)](https://Genesis929.github.io/genai-toolbox/dev/getting-started/local_quickstart/): How to get started running Toolbox locally with [Python](https://github.com/googleapis/mcp-toolbox-sdk-python), PostgreSQL, and  [Agent Development Kit](https://google.github.io/adk-docs/), [LangGraph](https://www.langchain.com/langgraph), [LlamaIndex](https://www.llamaindex.ai/) or [GoogleGenAI](https://pypi.org/project/google-genai/).
 - [JS Quickstart (Local)](https://Genesis929.github.io/genai-toolbox/dev/getting-started/local_quickstart_js/): How to get started running Toolbox locally with [JavaScript](https://github.com/googleapis/mcp-toolbox-sdk-js), PostgreSQL, and orchestration frameworks such as [LangChain](https://js.langchain.com/docs/introduction/), [GenkitJS](https://genkit.dev/docs/get-started/),  [LlamaIndex](https://ts.llamaindex.ai/) and [GoogleGenAI](https://github.com/googleapis/js-genai).
 - [Go Quickstart (Local)](https://Genesis929.github.io/genai-toolbox/dev/getting-started/local_quickstart_go/): How to get started running Toolbox locally with [Go](https://github.com/googleapis/mcp-toolbox-sdk-go), PostgreSQL, and orchestration frameworks such as [LangChain Go](https://tmc.github.io/langchaingo/docs/), [GenkitGo](https://genkit.dev/go/docs/get-started-go/), [Go GenAI](https://github.com/googleapis/go-genai) and [OpenAI Go](https://github.com/openai/openai-go).
+- [Prompts using Gemini CLI](https://Genesis929.github.io/genai-toolbox/dev/getting-started/prompts_quickstart_gemini_cli/): How to get started using Toolbox prompts locally with PostgreSQL and [Gemini CLI](https://pypi.org/project/gemini-cli/).
 - [Quickstart (MCP)](https://Genesis929.github.io/genai-toolbox/dev/getting-started/mcp_quickstart/): How to get started running Toolbox locally with MCP Inspector.
 - [Configuration](https://Genesis929.github.io/genai-toolbox/dev/getting-started/configure/): How to configure Toolbox's tools.yaml file.
 
@@ -19,6 +20,9 @@ How to get started with Toolbox.
 Some core concepts in Toolbox
 - [Telemetry](https://Genesis929.github.io/genai-toolbox/dev/concepts/telemetry/): An overview of telemetry and observability in Toolbox.
 
+### Featured Articles
+
+Toolbox Medium Blogs
 ### How-to
 
 List of guides detailing how to do different things with Toolbox. 
@@ -39,6 +43,7 @@ List of guides detailing how to do different things with Toolbox.
 - [Connect via MCP Client](https://Genesis929.github.io/genai-toolbox/dev/how-to/connect_via_mcp/): How to connect to Toolbox from a MCP Client.
 - [Toolbox UI](https://Genesis929.github.io/genai-toolbox/dev/how-to/toolbox-ui/): How to effectively use Toolbox UI.
 - [Connect via Gemini CLI Extensions](https://Genesis929.github.io/genai-toolbox/dev/how-to/connect_via_geminicli/): Connect to Toolbox via Gemini CLI Extensions.- [Deploy to Cloud Run](https://Genesis929.github.io/genai-toolbox/dev/how-to/deploy_toolbox/): How to set up and configure Toolbox to run on Cloud Run.
+- [Deploy ADK Agent and MCP Toolbox](https://Genesis929.github.io/genai-toolbox/dev/how-to/deploy_adk_agent/): How to deploy your ADK Agent to Vertex AI Agent Engine and connect it to an MCP Toolbox deployed on Cloud Run.
 - [Deploy to Kubernetes](https://Genesis929.github.io/genai-toolbox/dev/how-to/deploy_gke/): How to set up and configure Toolbox to deploy on Kubernetes with Google Kubernetes Engine (GKE).
 - [Deploy using Docker Compose](https://Genesis929.github.io/genai-toolbox/dev/how-to/deploy_docker/): How to deploy Toolbox using Docker Compose.
 - [Export Telemetry](https://Genesis929.github.io/genai-toolbox/dev/how-to/export_telemetry/): How to set up and configure Toolbox to use the Otel Collector.
@@ -50,10 +55,12 @@ List of reference documentation for resources in Toolbox.
   - [Google Sign-In](https://Genesis929.github.io/genai-toolbox/dev/resources/authservices/google/): Use Google Sign-In for Oauth 2.0 flow and token lifecycle.
 - [Sources](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/): Sources represent your different data sources that a tool can interact with.
   - [AlloyDB for PostgreSQL](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/alloydb-pg/): AlloyDB for PostgreSQL is a fully-managed, PostgreSQL-compatible database for demanding transactional workloads.
+  - [AlloyDB Admin](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/alloydb-admin/): The "alloydb-admin" source provides a client for the AlloyDB API.
   - [BigQuery](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/bigquery/): BigQuery is Google Cloud's fully managed, petabyte-scale, and cost-effective analytics data warehouse that lets you run analytics over vast amounts of  data in near real time. With BigQuery, there's no infrastructure to set  up or manage, letting you focus on finding meaningful insights using  GoogleSQL and taking advantage of flexible pricing models across on-demand  and flat-rate options.
   - [Bigtable](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/bigtable/): Bigtable is a low-latency NoSQL database service for machine learning, operational analytics, and user-facing operations. It's a wide-column, key-value store that can scale to billions of rows and thousands of columns. With Bigtable, you can replicate your data to regions across the world for high availability and data resiliency.
   - [Cassandra](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/cassandra/): Apache Cassandra is a NoSQL distributed database known for its horizontal scalability, distributed architecture, and flexible schema definition.
   - [ClickHouse](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/clickhouse/): ClickHouse is an open-source, OLTP database.
+  - [Cloud Healthcare API](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/cloud-healthcare/): The Cloud Healthcare API provides a managed solution for storing and accessing healthcare data in Google Cloud, providing a critical bridge  between existing care systems and applications hosted on Google Cloud.
   - [Cloud Monitoring](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/cloud-monitoring/): A "cloud-monitoring" source provides a client for the Cloud Monitoring API.
   - [Cloud SQL for MySQL](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/cloud-sql-mysql/): Cloud SQL for MySQL is a fully-managed database service for MySQL.
   - [Cloud SQL for PostgreSQL](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/cloud-sql-pg/): Cloud SQL for PostgreSQL is a fully-managed database service for Postgres.
@@ -65,8 +72,10 @@ List of reference documentation for resources in Toolbox.
   - [Elasticsearch](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/elasticsearch/): Elasticsearch is a distributed, free and open search and analytics engine  for all types of data, including textual, numerical, geospatial, structured,  and unstructured.
   - [Firebird](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/firebird/): Firebird is a powerful, cross-platform, and open-source relational database.
   - [Firestore](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/firestore/): Firestore is a NoSQL document database built for automatic scaling, high performance, and ease of application development. It's a fully managed, serverless database that supports mobile, web, and server development.
+  - [Gemini Data Analytics](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/cloud-gda/): A "cloud-gemini-data-analytics" source provides a client for the Gemini Data Analytics API.
   - [HTTP](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/http/): The HTTP source enables the Toolbox to retrieve data from a remote server using HTTP requests.
   - [Looker](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/looker/): Looker is a business intelligence tool that also provides a semantic layer.
+  - [MariaDB](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/mariadb/): MariaDB is an open-source relational database compatible with MySQL.
   - [MindsDB](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/mindsdb/): MindsDB is an AI federated database that enables SQL queries across hundreds of datasources and ML models.
   - [MongoDB](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/mongodb/): MongoDB is a no-sql data platform that can not only serve general purpose data requirements also perform VectorSearch where both operational data and embeddings used of search can reside in same document.
   - [MySQL](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/mysql/): MySQL is a relational database management system that stores and manages data.
@@ -76,6 +85,8 @@ List of reference documentation for resources in Toolbox.
   - [PostgreSQL](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/postgres/): PostgreSQL is a powerful, open source object-relational database.
   - [Redis](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/redis/): Redis is a in-memory data structure store.
   - [Serverless for Apache Spark](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/serverless-spark/): Google Cloud Serverless for Apache Spark lets you run Spark workloads without requiring you to provision and manage your own Spark cluster.
+  - [SingleStore](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/singlestore/): SingleStore is the cloud-native database built with speed and scale to power data-intensive applications.
+  - [Snowflake](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/snowflake/): Snowflake is a cloud-based data platform.
   - [Spanner](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/spanner/): Spanner is a fully managed database service from Google Cloud that combines  relational, key-value, graph, and search capabilities.
   - [SQL Server](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/mssql/): SQL Server is a relational database management system (RDBMS).
   - [SQLite](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/sqlite/): SQLite is a C-language library that implements a small, fast, self-contained,  high-reliability, full-featured, SQL database engine.
@@ -83,7 +94,8 @@ List of reference documentation for resources in Toolbox.
   - [Trino](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/trino/): Trino is a distributed SQL query engine for big data analytics.
   - [Valkey](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/valkey/): Valkey is an open-source, in-memory data structure store, forked from Redis.
   - [YugabyteDB](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/yugabytedb/): YugabyteDB is a high-performance, distributed SQL database. 
-  - [AlloyDB Admin](https://Genesis929.github.io/genai-toolbox/dev/resources/sources/alloydb-admin/): The "alloydb-admin" source provides a client for the AlloyDB API.
+- [EmbeddingModels](https://Genesis929.github.io/genai-toolbox/dev/resources/embeddingmodels/): EmbeddingModels represent services that transform text into vector embeddings for semantic search.
+  - [Gemini Embedding](https://Genesis929.github.io/genai-toolbox/dev/resources/embeddingmodels/gemini/): Use Google's Gemini models to generate high-performance text embeddings for vector databases.
 - [Tools](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/): Tools define actions an agent can take -- such as reading and writing to a source.
   - [AlloyDB AI NL](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/alloydbainl/): AlloyDB AI NL Tool.
   - [AlloyDB for PostgreSQL](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/alloydb/): Tools for AlloyDB for PostgreSQL.
@@ -91,6 +103,7 @@ List of reference documentation for resources in Toolbox.
   - [Bigtable](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/bigtable/): Tools that work with Bigtable Sources.
   - [Cassandra](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/cassandra/): Tools that work with Cassandra Sources.
   - [ClickHouse](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/clickhouse/): Tools for interacting with ClickHouse databases and tables.
+  - [Cloud Healthcare API](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/cloudhealthcare/): Tools that work with Cloud Healthcare Sources.
   - [Cloud Monitoring](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/cloudmonitoring/): Tools that work with Cloud Monitoring source.
   - [Cloud SQL](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/cloudsql/): Tools that work with Cloud SQL. 
   - [Couchbase](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/couchbase/): Tools that work with Couchbase Sources.
@@ -100,6 +113,7 @@ List of reference documentation for resources in Toolbox.
   - [Elasticsearch](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/elasticsearch/): Tools that work with Elasticsearch Sources.
   - [Firebird](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/firebird/): Tools that work with Firebird Sources.
   - [Firestore](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/firestore/): Tools that work with Firestore Sources.
+  - [Gemini Data Analytics](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/cloudgda/): Tools for Gemini Data Analytics.
   - [HTTP](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/http/): Tools that work with HTTP Sources.
   - [Looker](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/looker/): Tools that work with Looker Sources.
   - [MindsDB Tools](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/mindsdb/): MindsDB tools that enable SQL queries across hundreds of datasources and ML models.
@@ -111,6 +125,8 @@ List of reference documentation for resources in Toolbox.
   - [Postgres](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/postgres/): Tools that work with Postgres Sources, such as Cloud SQL for Postgres and AlloyDB. 
   - [Redis](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/redis/): Tools that work with Redis Sources.
   - [Serverless for Apache Spark](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/serverless-spark/): Tools that work with Google Cloud Serverless for Apache Spark Sources.
+  - [SingleStore](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/singlestore/): Tools that work with SingleStore Sources
+  - [Snowflake](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/snowflake/): Tools that work with Snowflake Sources.
   - [Spanner](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/spanner/): Tools that work with Spanner Sources.
   - [SQL Server](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/mssql/): Tools that work with SQL Server Sources, such as CloudSQL for SQL Server.
   - [SQLite](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/sqlite/): Tools that work with SQLite Sources.
@@ -119,6 +135,8 @@ List of reference documentation for resources in Toolbox.
   - [Utility tools](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/utility/): Tools that provide utility.
   - [Valkey](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/valkey/): Tools that work with Valkey Sources.
   - [YugabyteDB](https://Genesis929.github.io/genai-toolbox/dev/resources/tools/yuagbytedb/): Tools that work with Valkey Sources.
+- [Prompts](https://Genesis929.github.io/genai-toolbox/dev/resources/prompts/): Prompts allow servers to provide structured messages and instructions for interacting with language models.
+  - [Custom](https://Genesis929.github.io/genai-toolbox/dev/resources/prompts/custom/): Custom prompts defined by the user.
 
 ### Samples
 
@@ -133,6 +151,9 @@ Samples and guides for using Toolbox.
   - [Gemini-CLI and OAuth](https://Genesis929.github.io/genai-toolbox/dev/samples/looker/looker_gemini_oauth/): How to connect to Looker from Gemini-CLI with end-user credentials
   - [Quickstart (MCP with Looker and Gemini-CLI)](https://Genesis929.github.io/genai-toolbox/dev/samples/looker/looker_gemini/): How to get started running Toolbox with Gemini-CLI and Looker as the source.
   - [Quickstart (MCP with Looker)](https://Genesis929.github.io/genai-toolbox/dev/samples/looker/looker_mcp_inspector/): How to get started running Toolbox with MCP Inspector and Looker as the source.
+- [Neo4j](https://Genesis929.github.io/genai-toolbox/dev/samples/neo4j/): How to get started with Toolbox using Neo4j.
+  - [Quickstart (MCP with Neo4j)](https://Genesis929.github.io/genai-toolbox/dev/samples/neo4j/mcp_quickstart/): How to get started running Toolbox with MCP Inspector and Neo4j as the source.
+- [Snowflake](https://Genesis929.github.io/genai-toolbox/dev/samples/snowflake/): How to get started running Toolbox with MCP Inspector and Snowflake as the source.
 
 ### About
 
