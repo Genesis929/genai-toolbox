@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	yaml "github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
@@ -166,13 +167,14 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	if location == "" {
 		location = "us"
 	}
-	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents/%s", projectID, location, dataAgentId)
+	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents/%s", projectID, location, url.PathEscape(dataAgentId))
 
 	req, err := http.NewRequest("GET", caURL, nil)
 	if err != nil {
 		return nil, util.NewClientServerError("failed to create request", http.StatusInternalServerError, err)
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tokenStr))
+	req.Header.Set("X-Goog-API-Client", util.GDAClientID)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -183,7 +185,10 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, util.NewClientServerError(fmt.Sprintf("API returned non-200 status: %d %s", resp.StatusCode, string(body)), resp.StatusCode, nil)
+		if logger, lerr := util.LoggerFromContext(ctx); lerr == nil {
+			logger.ErrorContext(ctx, "conversational analytics API error", "status", resp.StatusCode, "body", string(body))
+		}
+		return nil, util.NewClientServerError(fmt.Sprintf("API returned non-200 status: %d", resp.StatusCode), resp.StatusCode, nil)
 	}
 
 	var result map[string]any

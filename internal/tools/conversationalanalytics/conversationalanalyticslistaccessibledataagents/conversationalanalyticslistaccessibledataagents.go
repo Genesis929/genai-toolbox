@@ -16,6 +16,7 @@ package conversationalanalyticslistaccessibledataagents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -167,6 +168,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 		return nil, util.NewClientServerError("failed to create request", http.StatusInternalServerError, err)
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tokenStr))
+	req.Header.Set("X-Goog-API-Client", util.GDAClientID)
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -177,11 +179,18 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, util.NewClientServerError(fmt.Sprintf("API returned non-200 status: %d %s", resp.StatusCode, string(body)), resp.StatusCode, nil)
+		if logger, lerr := util.LoggerFromContext(ctx); lerr == nil {
+			logger.ErrorContext(ctx, "conversational analytics API error", "status", resp.StatusCode, "body", string(body))
+		}
+		return nil, util.NewClientServerError(fmt.Sprintf("API returned non-200 status: %d", resp.StatusCode), resp.StatusCode, nil)
 	}
 
-	body, _ := io.ReadAll(resp.Body)
-	return string(body), nil
+	var result any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, util.NewClientServerError("failed to decode response", http.StatusInternalServerError, err)
+	}
+
+	return result, nil
 }
 
 func (t Tool) EmbedParams(ctx context.Context, paramValues parameters.ParamValues, embeddingModelsMap map[string]embeddingmodels.EmbeddingModel) (parameters.ParamValues, error) {

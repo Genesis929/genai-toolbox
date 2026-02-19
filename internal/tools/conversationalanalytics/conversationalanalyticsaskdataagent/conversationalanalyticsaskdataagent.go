@@ -200,8 +200,9 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s:chat", projectID, location)
 
 	headers := map[string]string{
-		"Authorization": fmt.Sprintf("Bearer %s", tokenStr),
-		"Content-Type":  "application/json",
+		"Authorization":     fmt.Sprintf("Bearer %s", tokenStr),
+		"Content-Type":      "application/json",
+		"X-Goog-API-Client": util.GDAClientID,
 	}
 
 	maxQueryResultRows := source.GetMaxQueryResultRows()
@@ -214,11 +215,11 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 		DataAgentContext: DataAgentContext{
 			DataAgent: dataAgentName,
 		},
-		ClientIdEnum: "GENAI_TOOLBOX",
+		ClientIdEnum: util.GDAClientID,
 	}
 
 	// Call the streaming API
-	response, err := getStream(caURL, payload, headers, maxQueryResultRows)
+	response, err := getStream(ctx, caURL, payload, headers, maxQueryResultRows)
 	if err != nil {
 		return nil, util.NewClientServerError("failed to get response from conversational analytics API", http.StatusInternalServerError, err)
 	}
@@ -336,7 +337,7 @@ type ErrorResponse struct {
 	Message string  `json:"message"`
 }
 
-func getStream(url string, payload CAPayload, headers map[string]string, maxRows int) (string, error) {
+func getStream(ctx context.Context, url string, payload CAPayload, headers map[string]string, maxRows int) (string, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
@@ -359,7 +360,10 @@ func getStream(url string, payload CAPayload, headers map[string]string, maxRows
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("API returned non-200 status: %d %s", resp.StatusCode, string(body))
+		if logger, lerr := util.LoggerFromContext(ctx); lerr == nil {
+			logger.ErrorContext(ctx, "conversational analytics API error", "status", resp.StatusCode, "body", string(body))
+		}
+		return "", fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
 	}
 
 	var messages []map[string]any
