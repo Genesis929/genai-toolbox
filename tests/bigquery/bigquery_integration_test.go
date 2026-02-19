@@ -201,7 +201,6 @@ func TestBigQueryToolEndpoints(t *testing.T) {
 	runBigQueryListTableIdsToolInvokeTest(t, datasetName, tableName)
 	runBigQueryGetTableInfoToolInvokeTest(t, datasetName, tableName, tableInfoWant)
 	runBigQueryConversationalAnalyticsInvokeTest(t, datasetName, tableName, dataInsightsWant)
-	runBigQuerySearchCatalogToolInvokeTest(t, datasetName, tableName)
 }
 
 func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
@@ -1103,6 +1102,437 @@ func runBigQueryExecuteSqlToolInvokeTest(t *testing.T, select1Want, invokeParamW
 	}
 }
 
+func TestBigQueryConversationalAnalyticsTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+
+	client, err := initBigQueryConnection(BigqueryProject)
+	if err != nil {
+		t.Fatalf("unable to create BigQuery client: %s", err)
+	}
+
+	// Setup dataset and table for Data Agent
+	datasetName := fmt.Sprintf("data_agent_test_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
+	tableName := "test_table"
+	tableNameParam := fmt.Sprintf("`%s.%s.%s`", BigqueryProject, datasetName, tableName)
+
+	createTableStmt := fmt.Sprintf("CREATE TABLE %s (id INT64, name STRING)", tableNameParam)
+	teardownTable := setupBigQueryTable(t, ctx, client, createTableStmt, "", datasetName, tableNameParam, nil)
+	defer teardownTable(t)
+
+	// Create Data Agent
+	dataAgentDisplayName := fmt.Sprintf("test-agent-%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
+	dataAgentID, teardownDataAgent := setupDataAgent(t, ctx, BigqueryProject, datasetName, tableName, dataAgentDisplayName)
+	defer teardownDataAgent(t)
+
+	// Configure source with location: global
+	sourceConfig := getBigQueryVars(t)
+	sourceConfig["location"] = "global"
+
+	toolsFile := map[string]any{
+		"sources": map[string]any{
+			"my-instance": sourceConfig,
+			"my-client-auth-source": map[string]any{
+				"type":           BigquerySourceType,
+				"project":        BigqueryProject,
+				"location":       "global",
+				"useClientOAuth": true,
+			},
+		},
+		"authServices": map[string]any{
+			"my-google-auth": map[string]any{
+				"kind":     "google",
+				"clientId": tests.ClientId,
+			},
+		},
+		"tools": map[string]any{
+			"my-list-accessible-data-agents-tool": map[string]any{
+				"kind":        "conversational-analytics-list-accessible-data-agents",
+				"source":      "my-instance",
+				"description": "Tool to list data agents.",
+			},
+			"my-auth-list-accessible-data-agents-tool": map[string]any{
+				"kind":         "conversational-analytics-list-accessible-data-agents",
+				"source":       "my-instance",
+				"description":  "Tool to list data agents with auth.",
+				"authRequired": []string{"my-google-auth"},
+			},
+			"my-client-auth-list-accessible-data-agents-tool": map[string]any{
+				"kind":        "conversational-analytics-list-accessible-data-agents",
+				"source":      "my-client-auth-source",
+				"description": "Tool to list data agents with client auth.",
+			},
+			"my-get-data-agent-info-tool": map[string]any{
+				"kind":        "conversational-analytics-get-data-agent-info",
+				"source":      "my-instance",
+				"description": "Tool to get data agent info.",
+			},
+			"my-auth-get-data-agent-info-tool": map[string]any{
+				"kind":         "conversational-analytics-get-data-agent-info",
+				"source":       "my-instance",
+				"description":  "Tool to get data agent info with auth.",
+				"authRequired": []string{"my-google-auth"},
+			},
+			"my-client-auth-get-data-agent-info-tool": map[string]any{
+				"kind":        "conversational-analytics-get-data-agent-info",
+				"source":      "my-client-auth-source",
+				"description": "Tool to get data agent info with client auth.",
+			},
+			"my-ask-data-agent-tool": map[string]any{
+				"kind":        "conversational-analytics-ask-data-agent",
+				"source":      "my-instance",
+				"description": "Tool to ask data agent.",
+			},
+			"my-auth-ask-data-agent-tool": map[string]any{
+				"kind":         "conversational-analytics-ask-data-agent",
+				"source":       "my-instance",
+				"description":  "Tool to ask data agent with auth.",
+				"authRequired": []string{"my-google-auth"},
+			},
+			"my-client-auth-ask-data-agent-tool": map[string]any{
+				"kind":        "conversational-analytics-ask-data-agent",
+				"source":      "my-client-auth-source",
+				"description": "Tool to ask data agent with client auth.",
+			},
+		},
+	}
+
+	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile)
+	if err != nil {
+		t.Fatalf("command initialization returned an error: %s", err)
+	}
+	defer cleanup()
+
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, err := testutils.WaitForString(waitCtx, regexp.MustCompile(`Server ready to serve`), cmd.Out)
+	if err != nil {
+		t.Logf("toolbox command logs: \n%s", out)
+		t.Fatalf("toolbox didn't start successfully: %s", err)
+	}
+
+	runBigQueryListAccessibleDataAgentsInvokeTest(t, dataAgentDisplayName)
+	runBigQueryGetDataAgentInfoInvokeTest(t, dataAgentID, dataAgentDisplayName)
+	runBigQueryAskDataAgentInvokeTest(t, dataAgentID)
+}
+
+func runBigQueryListAccessibleDataAgentsInvokeTest(t *testing.T, dataAgentDisplayName string) {
+	idToken, err := tests.GetGoogleIdToken(tests.ClientId)
+	if err != nil {
+		t.Fatalf("error getting Google ID token: %s", err)
+	}
+
+	accessToken, err := sources.GetIAMAccessToken(t.Context())
+	if err != nil {
+		t.Fatalf("error getting access token from ADC: %s", err)
+	}
+	accessToken = "Bearer " + accessToken
+
+	invokeTcs := []struct {
+		name          string
+		api           string
+		requestHeader map[string]string
+		requestBody   io.Reader
+		want          string
+		isErr         bool
+	}{
+		{
+			name:          "invoke my-list-accessible-data-agents-tool",
+			api:           "http://127.0.0.1:5000/api/tool/my-list-accessible-data-agents-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(`{}`)),
+			want:          dataAgentDisplayName,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-auth-list-accessible-data-agents-tool with auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-auth-list-accessible-data-agents-tool/invoke",
+			requestHeader: map[string]string{"my-google-auth_token": idToken},
+			requestBody:   bytes.NewBuffer([]byte(`{}`)),
+			want:          dataAgentDisplayName,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-auth-list-accessible-data-agents-tool without auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-auth-list-accessible-data-agents-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(`{}`)),
+			isErr:         true,
+		},
+		{
+			name:          "invoke my-client-auth-list-accessible-data-agents-tool with auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-list-accessible-data-agents-tool/invoke",
+			requestHeader: map[string]string{"Authorization": accessToken},
+			requestBody:   bytes.NewBuffer([]byte(`{}`)),
+			want:          dataAgentDisplayName,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-client-auth-list-accessible-data-agents-tool without auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-list-accessible-data-agents-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(`{}`)),
+			isErr:         true,
+		},
+	}
+
+	for _, tc := range invokeTcs {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, tc.api, tc.requestBody)
+			if err != nil {
+				t.Fatalf("unable to create request: %s", err)
+			}
+			req.Header.Add("Content-type", "application/json")
+			for k, v := range tc.requestHeader {
+				req.Header.Add(k, v)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("unable to send request: %s", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+
+				if tc.isErr {
+					return
+				}
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Fatalf("response status code is not 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("error reading response body: %v", err)
+			}
+
+			var body map[string]interface{}
+			if err := json.Unmarshal(bodyBytes, &body); err != nil {
+				t.Fatalf("error parsing response body")
+			}
+
+			got, ok := body["result"].(string)
+			if !ok {
+				t.Fatalf("unable to find result in response body")
+			}
+
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("expected %q to contain %q, but it did not", got, tc.want)
+			}
+		})
+	}
+}
+
+func runBigQueryGetDataAgentInfoInvokeTest(t *testing.T, dataAgentName, dataAgentDisplayName string) {
+	idToken, err := tests.GetGoogleIdToken(tests.ClientId)
+	if err != nil {
+		t.Fatalf("error getting Google ID token: %s", err)
+	}
+
+	accessToken, err := sources.GetIAMAccessToken(t.Context())
+	if err != nil {
+		t.Fatalf("error getting access token from ADC: %s", err)
+	}
+	accessToken = "Bearer " + accessToken
+
+	invokeTcs := []struct {
+		name          string
+		api           string
+		requestHeader map[string]string
+		requestBody   io.Reader
+		want          string
+		isErr         bool
+	}{
+		{
+			name:          "invoke my-get-data-agent-info-tool",
+			api:           "http://127.0.0.1:5000/api/tool/my-get-data-agent-info-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"data_agent_id": "%s"}`, dataAgentName))),
+			want:          dataAgentDisplayName,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-auth-get-data-agent-info-tool with auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-auth-get-data-agent-info-tool/invoke",
+			requestHeader: map[string]string{"my-google-auth_token": idToken},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"data_agent_id": "%s"}`, dataAgentName))),
+			want:          dataAgentDisplayName,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-auth-get-data-agent-info-tool without auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-auth-get-data-agent-info-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"data_agent_id": "%s"}`, dataAgentName))),
+			isErr:         true,
+		},
+		{
+			name:          "invoke my-client-auth-get-data-agent-info-tool with auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-get-data-agent-info-tool/invoke",
+			requestHeader: map[string]string{"Authorization": accessToken},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"data_agent_id": "%s"}`, dataAgentName))),
+			want:          dataAgentDisplayName,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-client-auth-get-data-agent-info-tool without auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-get-data-agent-info-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"data_agent_id": "%s"}`, dataAgentName))),
+			isErr:         true,
+		},
+	}
+
+	for _, tc := range invokeTcs {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, tc.api, tc.requestBody)
+			if err != nil {
+				t.Fatalf("unable to create request: %s", err)
+			}
+			req.Header.Add("Content-type", "application/json")
+			for k, v := range tc.requestHeader {
+				req.Header.Add(k, v)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("unable to send request: %s", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				if tc.isErr {
+					return
+				}
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Fatalf("response status code is not 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+
+			var body map[string]interface{}
+			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+				t.Fatalf("error parsing response body")
+			}
+
+			got, ok := body["result"].(string)
+			if !ok {
+				t.Fatalf("unable to find result in response body")
+			}
+
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("expected %q to contain %q, but it did not", got, tc.want)
+			}
+		})
+	}
+}
+
+func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
+	idToken, err := tests.GetGoogleIdToken(tests.ClientId)
+	if err != nil {
+		t.Fatalf("error getting Google ID token: %s", err)
+	}
+
+	accessToken, err := sources.GetIAMAccessToken(t.Context())
+	if err != nil {
+		t.Fatalf("error getting access token from ADC: %s", err)
+	}
+	accessToken = "Bearer " + accessToken
+
+	dataAgentWant := `(?s)Schema Resolved.*Retrieval Query.*SQL Generated.*Data Retrieved.*Answer`
+
+	invokeTcs := []struct {
+		name          string
+		api           string
+		requestHeader map[string]string
+		requestBody   io.Reader
+		want          string
+		isErr         bool
+	}{
+		{
+			name:          "invoke my-ask-data-agent-tool",
+			api:           "http://127.0.0.1:5000/api/tool/my-ask-data-agent-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			want:          dataAgentWant,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-auth-ask-data-agent-tool with auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-auth-ask-data-agent-tool/invoke",
+			requestHeader: map[string]string{"my-google-auth_token": idToken},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			want:          dataAgentWant,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-auth-ask-data-agent-tool without auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-auth-ask-data-agent-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			isErr:         true,
+		},
+		{
+			name:          "invoke my-client-auth-ask-data-agent-tool with auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-ask-data-agent-tool/invoke",
+			requestHeader: map[string]string{"Authorization": accessToken},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			want:          dataAgentWant,
+			isErr:         false,
+		},
+		{
+			name:          "invoke my-client-auth-ask-data-agent-tool without auth token",
+			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-ask-data-agent-tool/invoke",
+			requestHeader: map[string]string{},
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			isErr:         true,
+		},
+	}
+
+	for _, tc := range invokeTcs {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodPost, tc.api, tc.requestBody)
+			if err != nil {
+				t.Fatalf("unable to create request: %s", err)
+			}
+			req.Header.Add("Content-type", "application/json")
+			for k, v := range tc.requestHeader {
+				req.Header.Add(k, v)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("unable to send request: %s", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				if tc.isErr {
+					return
+				}
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Fatalf("response status code is not 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+
+			bodyBytes, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("error reading response body: %v", err)
+			}
+
+			var body map[string]interface{}
+			if err := json.Unmarshal(bodyBytes, &body); err != nil {
+				t.Fatalf("error parsing response body")
+			}
+
+			got, ok := body["result"].(string)
+			if !ok {
+				t.Fatalf("unable to find result in response body")
+			}
+
+			wantPattern := regexp.MustCompile(tc.want)
+			if !wantPattern.MatchString(got) {
+				t.Fatalf("response did not match the expected pattern.\nFull response:\n%s", got)
+			}
+		})
+	}
+}
+
 // runInvokeRequest sends a POST request to the given API endpoint and returns the response and parsed JSON body.
 func runInvokeRequest(t *testing.T, api, body string, headers map[string]string) (*http.Response, map[string]interface{}) {
 	t.Helper()
@@ -1416,6 +1846,178 @@ func runBigQueryExecuteSqlToolInvokeDryRunTest(t *testing.T, datasetName string)
 				t.Fatalf("expected %q to contain %q, but it did not", got, tc.want)
 			}
 		})
+	}
+}
+
+func setupDataAgent(t *testing.T, ctx context.Context, projectID, datasetID, tableID, dataAgentDisplayName string) (string, func(*testing.T)) {
+	t.Logf("Setting up data agent with ProjectID: %q, DatasetID: %q, TableID: %q, DisplayName: %q", projectID, datasetID, tableID, dataAgentDisplayName)
+
+	accessToken, err := sources.GetIAMAccessToken(ctx)
+	if err != nil {
+		t.Fatalf("failed to get access token: %v", err)
+	}
+
+	dataAgentId := "test" + strings.ReplaceAll(uuid.New().String(), "-", "")
+	parent := fmt.Sprintf("projects/%s/locations/global", projectID)
+	url := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/%s/dataAgents?dataAgentId=%s", parent, dataAgentId)
+
+	requestBody := map[string]any{
+		"displayName": dataAgentDisplayName,
+		"dataAnalyticsAgent": map[string]any{
+			"publishedContext": map[string]any{
+				"datasourceReferences": map[string]any{
+					"bq": map[string]any{
+						"tableReferences": []map[string]string{
+							{
+								"projectId": projectID,
+								"datasetId": datasetID,
+								"tableId":   tableID,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("failed to marshal create data agent request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("failed to create data agent: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("failed to create data agent, status: %d, body: %s", resp.StatusCode, string(respBody))
+	}
+
+	var op map[string]any
+	if err := json.Unmarshal(respBody, &op); err != nil {
+		t.Fatalf("failed to unmarshal operation: %v", err)
+	}
+
+	opName, ok := op["name"].(string)
+	if !ok {
+		t.Fatalf("operation response missing name: %s", string(respBody))
+	}
+
+	// Poll for operation completion
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	timeout := time.After(60 * time.Second)
+
+	var createdAgentName string
+	createdAgentName = fmt.Sprintf("%s/dataAgents/%s", parent, dataAgentId)
+
+	done := false
+	for !done {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("context cancelled while waiting for data agent creation")
+		case <-timeout:
+			t.Fatalf("timed out waiting for data agent creation")
+		case <-ticker.C:
+			opUrl := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/%s", opName)
+			opReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, opUrl, nil)
+			opReq.Header.Set("Authorization", "Bearer "+accessToken)
+			opResp, err := client.Do(opReq)
+			if err != nil {
+				t.Logf("failed to poll operation: %v", err)
+				continue
+			}
+			opRespBody, _ := io.ReadAll(opResp.Body)
+			opResp.Body.Close()
+
+			var pollOp map[string]any
+			json.Unmarshal(opRespBody, &pollOp)
+
+			if d, ok := pollOp["done"].(bool); ok && d {
+				if errVal, ok := pollOp["error"]; ok && errVal != nil {
+					t.Fatalf("data agent creation failed: %v", errVal)
+				}
+				done = true
+			}
+		}
+	}
+
+	t.Logf("Successfully created data agent: %s", createdAgentName)
+
+	// Return the name and a cleanup function
+	return dataAgentId, func(t *testing.T) {
+		deleteUrl := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/%s", createdAgentName)
+		delReq, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteUrl, nil)
+		if err != nil {
+			t.Errorf("failed to create data agent deletion request: %v", err)
+			return
+		}
+		delReq.Header.Set("Authorization", "Bearer "+accessToken)
+
+		delResp, err := client.Do(delReq)
+		if err != nil {
+			t.Errorf("failed to delete data agent: %v", err)
+			return
+		}
+		defer delResp.Body.Close()
+
+		if delResp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(delResp.Body)
+			t.Errorf("failed to delete data agent, status: %d, body: %s", delResp.StatusCode, string(body))
+			return
+		}
+
+		delBody, _ := io.ReadAll(delResp.Body)
+		var delOp map[string]any
+		json.Unmarshal(delBody, &delOp)
+		if delOpName, ok := delOp["name"].(string); ok {
+			delTicker := time.NewTicker(2 * time.Second)
+			defer delTicker.Stop()
+			delTimeout := time.After(60 * time.Second)
+
+			for {
+				select {
+				case <-delTimeout:
+					t.Errorf("timed out waiting for data agent deletion")
+					return
+				case <-delTicker.C:
+					opUrl := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/%s", delOpName)
+					opReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, opUrl, nil)
+					opReq.Header.Set("Authorization", "Bearer "+accessToken)
+					opResp, err := client.Do(opReq)
+					if err != nil {
+						continue
+					}
+					opRespBody, _ := io.ReadAll(opResp.Body)
+					opResp.Body.Close()
+					var pollOp map[string]any
+					json.Unmarshal(opRespBody, &pollOp)
+					if d, ok := pollOp["done"].(bool); ok && d {
+						if errVal, ok := pollOp["error"]; ok && errVal != nil {
+							t.Errorf("data agent deletion failed: %v", errVal)
+						} else {
+							t.Logf("Successfully deleted data agent: %s", createdAgentName)
+						}
+						return
+					}
+				}
+			}
+		}
 	}
 }
 

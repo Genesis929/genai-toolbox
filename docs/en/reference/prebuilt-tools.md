@@ -167,6 +167,8 @@ See [Usage Examples](../reference/cli.md#examples).
         OAuth access token for authentication. Defaults to `false`.
     *   `BIGQUERY_SCOPES`: (Optional) A comma-separated list of OAuth scopes to
         use for authentication.
+    *   `BIGQUERY_MAX_QUERY_RESULT_ROWS`: (Optional) The maximum number of rows
+        to return. Defaults to `50`.
 *   **Permissions:**
     *   **BigQuery User** (`roles/bigquery.user`) to execute queries and view
         metadata.
@@ -192,6 +194,25 @@ See [Usage Examples](../reference/cli.md#examples).
     *   `list_dataset_ids`: Lists datasets.
     *   `list_table_ids`: Lists tables.
     *   `search_catalog`: Search for entries based on the provided query.
+
+## BigQuery Conversational Analytics with Data Agent
+
+*   `--prebuilt` value: `bigquery-conversational-analytics-with-data-agent`
+*   **Environment Variables:**
+    *   `BIGQUERY_PROJECT`: The GCP project ID.
+    *   `BIGQUERY_USE_CLIENT_OAUTH`: (Optional) If `true`, forwards the client's
+        OAuth access token for authentication. Defaults to `false`.
+*   **Permissions:**
+    *   **Gemini Data Analytics Stateless Chat User (Beta)** (`roles/geminidataanalytics.dataAgentStatelessUser`)
+*   **Tools:**
+    *   `ask_data_agent`: Use this tool to perform data analysis, get
+        insights, or answer complex questions about the contents of specific
+        BigQuery tables. For more information on required roles, API setup, and
+        IAM configuration, see the setup and authentication section of the
+        [Conversational Analytics API
+        documentation](https://cloud.google.com/gemini/docs/conversational-analytics-api/overview).
+    *   `get_data_agent_info`: Retrieve details about a specific data agent.
+    *   `list_accessible_data_agents`: List data agents that are accessible.
 
 ## ClickHouse
 

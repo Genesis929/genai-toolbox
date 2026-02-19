@@ -50,7 +50,7 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 }
 
 type compatibleSource interface {
-	BigQueryProject() string
+	GoogleCloudProject() string
 	UseClientAuthorization() bool
 	IsDatasetAllowed(projectID, datasetID string) bool
 	BigQueryAllowedDatasets() []string
@@ -85,7 +85,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		return nil, fmt.Errorf("invalid source for %q tool: source %q not compatible", resourceType, cfg.Source)
 	}
 
-	defaultProjectID := s.BigQueryProject()
+	defaultProjectID := s.GoogleCloudProject()
 	projectDescription := "The Google Cloud project ID containing the dataset and table."
 	datasetDescription := "The table's parent dataset."
 	var datasetParameter parameters.Parameter

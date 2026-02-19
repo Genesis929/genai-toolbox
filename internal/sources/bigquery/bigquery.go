@@ -420,11 +420,11 @@ func (s *Source) UseClientAuthorization() bool {
 	return s.UseClientOAuth
 }
 
-func (s *Source) BigQueryProject() string {
+func (s *Source) GoogleCloudProject() string {
 	return s.Project
 }
 
-func (s *Source) BigQueryLocation() string {
+func (s *Source) GoogleCloudLocation() string {
 	return s.Location
 }
 
@@ -432,8 +432,11 @@ func (s *Source) BigQueryTokenSource() oauth2.TokenSource {
 	return s.TokenSource
 }
 
-func (s *Source) BigQueryTokenSourceWithScope(ctx context.Context, scopes []string) (oauth2.TokenSource, error) {
-	if len(scopes) == 0 {
+func (s *Source) GoogleCloudTokenSourceWithScope(ctx context.Context, scope string) (oauth2.TokenSource, error) {
+	var scopes []string
+	if scope != "" {
+		scopes = []string{scope}
+	} else {
 		scopes = s.Scopes
 		if len(scopes) == 0 {
 			scopes = []string{CloudPlatformScope}

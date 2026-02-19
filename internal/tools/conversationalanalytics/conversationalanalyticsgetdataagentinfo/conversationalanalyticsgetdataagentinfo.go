@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bigquerygetdatasetinfo
+package conversationalanalyticsgetdataagentinfo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
-	bigqueryapi "cloud.google.com/go/bigquery"
 	yaml "github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
+	bigqueryds "github.com/googleapis/genai-toolbox/internal/sources/bigquery"
 	"github.com/googleapis/genai-toolbox/internal/tools"
-	bqutil "github.com/googleapis/genai-toolbox/internal/tools/bigquery/bigquerycommon"
 	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
-	bigqueryrestapi "google.golang.org/api/bigquery/v2"
+	"golang.org/x/oauth2"
 )
 
-const resourceType string = "bigquery-get-dataset-info"
-const projectKey string = "project"
-const datasetKey string = "dataset"
+const resourceType string = "conversational-analytics-get-data-agent-info"
 
 func init() {
 	if !tools.Register(resourceType, newConfig) {
@@ -49,12 +48,16 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 }
 
 type compatibleSource interface {
+	GoogleCloudTokenSourceWithScope(ctx context.Context, scope string) (oauth2.TokenSource, error)
 	GoogleCloudProject() string
+	GoogleCloudLocation() string
 	UseClientAuthorization() bool
-	IsDatasetAllowed(projectID, datasetID string) bool
-	BigQueryAllowedDatasets() []string
-	RetrieveClientAndService(tools.AccessToken) (*bigqueryapi.Client, *bigqueryrestapi.Service, error)
 }
+
+// validate compatible sources are still compatible
+var _ compatibleSource = &bigqueryds.Source{}
+
+var compatibleSources = [...]string{bigqueryds.SourceType}
 
 type Config struct {
 	Name         string   `yaml:"name" validate:"required"`
@@ -81,22 +84,16 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	// verify the source is compatible
 	s, ok := rawS.(compatibleSource)
 	if !ok {
-		return nil, fmt.Errorf("invalid source for %q tool: source %q not compatible", resourceType, cfg.Source)
+		return nil, fmt.Errorf("invalid source for %q tool: source kind must be one of %q", resourceType, compatibleSources)
 	}
 
-	defaultProjectID := s.GoogleCloudProject()
-	projectDescription := "The Google Cloud project ID containing the dataset."
-	datasetDescription := "The dataset to get metadata information. Can be in `project.dataset` format."
-	var datasetParameter parameters.Parameter
-	var projectParameter parameters.Parameter
+	location := s.GoogleCloudLocation()
+	if location != "global" {
+		return nil, fmt.Errorf("source %q has location %q, but %q tool only supports 'global' location", cfg.Source, location, resourceType)
+	}
 
-	projectParameter, datasetParameter = bqutil.InitializeDatasetParameters(
-		s.BigQueryAllowedDatasets(),
-		defaultProjectID,
-		projectKey, datasetKey,
-		projectDescription, datasetDescription)
-	params := parameters.Parameters{projectParameter, datasetParameter}
-
+	dataAgentIdParameter := parameters.NewStringParameter("data_agent_id", "The ID of the data agent to retrieve info for.")
+	params := parameters.Parameters{dataAgentIdParameter}
 	mcpManifest := tools.GetMcpManifest(cfg.Name, cfg.Description, cfg.AuthRequired, params, nil)
 
 	// finish tool setup
@@ -122,41 +119,79 @@ type Tool struct {
 func (t Tool) ToConfig() tools.ToolConfig {
 	return t.Config
 }
+
 func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, params parameters.ParamValues, accessToken tools.AccessToken) (any, util.ToolboxError) {
 	source, err := tools.GetCompatibleSource[compatibleSource](resourceMgr, t.Source, t.Name, t.Type)
 	if err != nil {
 		return nil, util.NewClientServerError("source used is not compatible with the tool", http.StatusInternalServerError, err)
 	}
 
+	var tokenStr string
+
+	// Get credentials for the API call
+	if source.UseClientAuthorization() {
+		// Use client-side access token
+		if accessToken == "" {
+			return nil, util.NewClientServerError("tool is configured for client OAuth but no token was provided in the request header", http.StatusUnauthorized, nil)
+		}
+		tokenStr, err = accessToken.ParseBearerToken()
+		if err != nil {
+			return nil, util.NewClientServerError("error parsing access token", http.StatusUnauthorized, err)
+		}
+	} else {
+		// Get a token source for the Gemini Data Analytics API.
+		tokenSource, err := source.GoogleCloudTokenSourceWithScope(ctx, "")
+		if err != nil {
+			return nil, util.NewClientServerError("failed to get token source", http.StatusInternalServerError, err)
+		}
+
+		// Use cloud-platform token source for Gemini Data Analytics API
+		if tokenSource == nil {
+			return nil, util.NewClientServerError("cloud-platform token source is missing", http.StatusInternalServerError, nil)
+		}
+		token, err := tokenSource.Token()
+		if err != nil {
+			return nil, util.NewClientServerError("failed to get token from cloud-platform token source", http.StatusInternalServerError, err)
+		}
+		tokenStr = token.AccessToken
+	}
+
+	// Extract parameters from the map
 	mapParams := params.AsMap()
-	projectId, ok := mapParams[projectKey].(string)
-	if !ok {
-		// Updated: Use fmt.Sprintf for formatting, pass nil as cause
-		return nil, util.NewAgentError(fmt.Sprintf("invalid or missing '%s' parameter; expected a string", projectKey), nil)
-	}
+	dataAgentId, _ := mapParams["data_agent_id"].(string)
 
-	datasetId, ok := mapParams[datasetKey].(string)
-	if !ok {
-		return nil, util.NewAgentError(fmt.Sprintf("invalid or missing '%s' parameter; expected a string", datasetKey), nil)
+	// Construct URL
+	projectID := source.GoogleCloudProject()
+	location := source.GoogleCloudLocation()
+	if location == "" {
+		location = "us"
 	}
+	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents/%s", projectID, location, dataAgentId)
 
-	bqClient, _, err := source.RetrieveClientAndService(accessToken)
+	req, err := http.NewRequest("GET", caURL, nil)
 	if err != nil {
-		return nil, util.NewClientServerError("failed to retrieve BigQuery client", http.StatusInternalServerError, err)
+		return nil, util.NewClientServerError("failed to create request", http.StatusInternalServerError, err)
 	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", tokenStr))
 
-	if !source.IsDatasetAllowed(projectId, datasetId) {
-		return nil, util.NewAgentError(fmt.Sprintf("access denied to dataset '%s' because it is not in the configured list of allowed datasets for project '%s'", datasetId, projectId), nil)
-	}
-
-	dsHandle := bqClient.DatasetInProject(projectId, datasetId)
-
-	metadata, err := dsHandle.Metadata(ctx)
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, util.ProcessGcpError(err)
+		return nil, util.NewClientServerError("failed to send request", http.StatusInternalServerError, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, util.NewClientServerError(fmt.Sprintf("API returned non-200 status: %d %s", resp.StatusCode, string(body)), resp.StatusCode, nil)
 	}
 
-	return metadata, nil
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, util.NewClientServerError("failed to decode response", http.StatusInternalServerError, err)
+	}
+
+	return result, nil
 }
 
 func (t Tool) EmbedParams(ctx context.Context, paramValues parameters.ParamValues, embeddingModelsMap map[string]embeddingmodels.EmbeddingModel) (parameters.ParamValues, error) {

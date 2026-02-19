@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package bigqueryconversationalanalytics
+package conversationalanalyticsaskdataagent
 
 import (
 	"bytes"
@@ -23,24 +23,17 @@ import (
 	"net/http"
 	"strings"
 
-	bigqueryapi "cloud.google.com/go/bigquery"
 	yaml "github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
+	bigqueryds "github.com/googleapis/genai-toolbox/internal/sources/bigquery"
 	"github.com/googleapis/genai-toolbox/internal/tools"
 	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
 	"golang.org/x/oauth2"
 )
 
-const resourceType string = "bigquery-conversational-analytics"
-
-const gdaURLFormat = "https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s:chat"
-
-const instructions = `**INSTRUCTIONS - FOLLOW THESE RULES:**
-1. **CONTENT:** Your answer should present the supporting data and then provide a conclusion based on that data.
-2. **OUTPUT FORMAT:** Your entire response MUST be in plain text format ONLY.
-3. **NO CHARTS:** You are STRICTLY FORBIDDEN from generating any charts, graphs, images, or any other form of visualization.`
+const resourceType string = "conversational-analytics-ask-data-agent"
 
 func init() {
 	if !tools.Register(resourceType, newConfig) {
@@ -57,15 +50,17 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 }
 
 type compatibleSource interface {
-	BigQueryClient() *bigqueryapi.Client
 	GoogleCloudTokenSourceWithScope(ctx context.Context, scope string) (oauth2.TokenSource, error)
 	GoogleCloudProject() string
 	GoogleCloudLocation() string
 	GetMaxQueryResultRows() int
 	UseClientAuthorization() bool
-	IsDatasetAllowed(projectID, datasetID string) bool
-	BigQueryAllowedDatasets() []string
 }
+
+// validate compatible sources are still compatible
+var _ compatibleSource = &bigqueryds.Source{}
+
+var compatibleSources = [...]string{bigqueryds.SourceType}
 
 type BQTableReference struct {
 	ProjectID string `json:"projectId"`
@@ -80,31 +75,16 @@ type UserMessage struct {
 type Message struct {
 	UserMessage UserMessage `json:"userMessage"`
 }
-type BQDatasource struct {
-	TableReferences []BQTableReference `json:"tableReferences"`
-}
-type DatasourceReferences struct {
-	BQ BQDatasource `json:"bq"`
-}
-type ImageOptions struct {
-	NoImage map[string]any `json:"noImage"`
-}
-type ChartOptions struct {
-	Image ImageOptions `json:"image"`
-}
-type Options struct {
-	Chart ChartOptions `json:"chart"`
-}
-type InlineContext struct {
-	DatasourceReferences DatasourceReferences `json:"datasourceReferences"`
-	Options              Options              `json:"options"`
+
+type DataAgentContext struct {
+	DataAgent string `json:"dataAgent"`
 }
 
 type CAPayload struct {
-	Project       string        `json:"project"`
-	Messages      []Message     `json:"messages"`
-	InlineContext InlineContext `json:"inlineContext"`
-	ClientIdEnum  string        `json:"clientIdEnum"`
+	Project          string           `json:"project"`
+	Messages         []Message        `json:"messages"`
+	DataAgentContext DataAgentContext `json:"dataAgentContext"`
+	ClientIdEnum     string           `json:"clientIdEnum"`
 }
 
 type Config struct {
@@ -132,22 +112,18 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	// verify the source is compatible
 	s, ok := rawS.(compatibleSource)
 	if !ok {
-		return nil, fmt.Errorf("invalid source for %q tool: source %q not compatible", resourceType, cfg.Source)
+		return nil, fmt.Errorf("invalid source for %q tool: source kind must be one of %q", resourceType, compatibleSources)
 	}
 
-	allowedDatasets := s.BigQueryAllowedDatasets()
-	tableRefsDescription := `A JSON string of a list of BigQuery tables to use as context. Each object in the list must contain 'projectId', 'datasetId', and 'tableId'. Example: '[{"projectId": "my-gcp-project", "datasetId": "my_dataset", "tableId": "my_table"}]'.`
-	if len(allowedDatasets) > 0 {
-		datasetIDs := []string{}
-		for _, ds := range allowedDatasets {
-			datasetIDs = append(datasetIDs, fmt.Sprintf("`%s`", ds))
-		}
-		tableRefsDescription += fmt.Sprintf(" The tables must only be from datasets in the following list: %s.", strings.Join(datasetIDs, ", "))
+	location := s.GoogleCloudLocation()
+	if location != "global" {
+		return nil, fmt.Errorf("source %q has location %q, but %q tool only supports 'global' location", cfg.Source, location, resourceType)
 	}
-	userQueryParameter := parameters.NewStringParameter("user_query_with_context", "The user's question, potentially including conversation history and system instructions for context.")
-	tableRefsParameter := parameters.NewStringParameter("table_references", tableRefsDescription)
 
-	params := parameters.Parameters{userQueryParameter, tableRefsParameter}
+	dataAgentIdDescription := `The ID of the data agent to ask.`
+	userQueryParameter := parameters.NewStringParameter("user_query_with_context", "The question to ask the agent, potentially including conversation history for context.")
+	dataAgentIdParameter := parameters.NewStringParameter("data_agent_id", dataAgentIdDescription)
+	params := parameters.Parameters{dataAgentIdParameter, userQueryParameter}
 	mcpManifest := tools.GetMcpManifest(cfg.Name, cfg.Description, cfg.AuthRequired, params, nil)
 
 	// finish tool setup
@@ -212,25 +188,8 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 
 	// Extract parameters from the map
 	mapParams := params.AsMap()
+	dataAgentId, _ := mapParams["data_agent_id"].(string)
 	userQuery, _ := mapParams["user_query_with_context"].(string)
-
-	finalQueryText := fmt.Sprintf("%s\n**User Query and Context:**\n%s", instructions, userQuery)
-
-	tableRefsJSON, _ := mapParams["table_references"].(string)
-	var tableRefs []BQTableReference
-	if tableRefsJSON != "" {
-		if err := json.Unmarshal([]byte(tableRefsJSON), &tableRefs); err != nil {
-			return nil, util.NewAgentError("failed to parse 'table_references' JSON string", err)
-		}
-	}
-
-	if len(source.BigQueryAllowedDatasets()) > 0 {
-		for _, tableRef := range tableRefs {
-			if !source.IsDatasetAllowed(tableRef.ProjectID, tableRef.DatasetID) {
-				return nil, util.NewAgentError(fmt.Sprintf("access to dataset '%s.%s' (from table '%s') is not allowed", tableRef.ProjectID, tableRef.DatasetID, tableRef.TableID), nil)
-			}
-		}
-	}
 
 	// Construct URL, headers, and payload
 	projectID := source.GoogleCloudProject()
@@ -238,30 +197,29 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	if location == "" {
 		location = "us"
 	}
-	caURL := fmt.Sprintf(gdaURLFormat, projectID, location)
+	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s:chat", projectID, location)
 
 	headers := map[string]string{
-		"Authorization":     fmt.Sprintf("Bearer %s", tokenStr),
-		"Content-Type":      "application/json",
-		"X-Goog-API-Client": util.GDAClientID,
+		"Authorization": fmt.Sprintf("Bearer %s", tokenStr),
+		"Content-Type":  "application/json",
 	}
+
+	maxQueryResultRows := source.GetMaxQueryResultRows()
+
+	dataAgentName := fmt.Sprintf("projects/%s/locations/%s/dataAgents/%s", projectID, location, dataAgentId)
 
 	payload := CAPayload{
 		Project:  fmt.Sprintf("projects/%s", projectID),
-		Messages: []Message{{UserMessage: UserMessage{Text: finalQueryText}}},
-		InlineContext: InlineContext{
-			DatasourceReferences: DatasourceReferences{
-				BQ: BQDatasource{TableReferences: tableRefs},
-			},
-			Options: Options{Chart: ChartOptions{Image: ImageOptions{NoImage: map[string]any{}}}},
+		Messages: []Message{{UserMessage: UserMessage{Text: userQuery}}},
+		DataAgentContext: DataAgentContext{
+			DataAgent: dataAgentName,
 		},
-		ClientIdEnum: util.GDAClientID,
+		ClientIdEnum: "GENAI_TOOLBOX",
 	}
 
 	// Call the streaming API
-	response, err := getStream(caURL, payload, headers, source.GetMaxQueryResultRows())
+	response, err := getStream(caURL, payload, headers, maxQueryResultRows)
 	if err != nil {
-		// getStream wraps network errors or non-200 responses
 		return nil, util.NewClientServerError("failed to get response from conversational analytics API", http.StatusInternalServerError, err)
 	}
 
@@ -290,6 +248,14 @@ func (t Tool) RequiresClientAuthorization(resourceMgr tools.SourceProvider) (boo
 		return false, err
 	}
 	return source.UseClientAuthorization(), nil
+}
+
+func (t Tool) GetAuthTokenHeaderName(resourceMgr tools.SourceProvider) (string, error) {
+	return "Authorization", nil
+}
+
+func (t Tool) GetParameters() parameters.Parameters {
+	return t.Parameters
 }
 
 // StreamMessage represents a single message object from the streaming API response.
@@ -366,7 +332,7 @@ type DataResult struct {
 
 // ErrorResponse represents an error message from the API.
 type ErrorResponse struct {
-	Code    float64 `json:"code"` // JSON numbers are float64 by default
+	Code    float64 `json:"code"`
 	Message string  `json:"message"`
 }
 
@@ -557,18 +523,5 @@ func appendMessage(messages []map[string]any, newMessage map[string]any) []map[s
 	if newMessage == nil {
 		return messages
 	}
-	if len(messages) > 0 {
-		if _, ok := messages[len(messages)-1]["Data Retrieved"]; ok {
-			messages = messages[:len(messages)-1]
-		}
-	}
 	return append(messages, newMessage)
-}
-
-func (t Tool) GetAuthTokenHeaderName(resourceMgr tools.SourceProvider) (string, error) {
-	return "Authorization", nil
-}
-
-func (t Tool) GetParameters() parameters.Parameters {
-	return t.Parameters
 }
