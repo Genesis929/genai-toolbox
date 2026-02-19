@@ -1923,8 +1923,7 @@ func setupDataAgent(t *testing.T, ctx context.Context, projectID, datasetID, tab
 	defer ticker.Stop()
 	timeout := time.After(60 * time.Second)
 
-	var createdAgentName string
-	createdAgentName = fmt.Sprintf("%s/dataAgents/%s", parent, dataAgentId)
+	createdAgentName := fmt.Sprintf("%s/dataAgents/%s", parent, dataAgentId)
 
 	done := false
 	for !done {
@@ -1946,7 +1945,10 @@ func setupDataAgent(t *testing.T, ctx context.Context, projectID, datasetID, tab
 			opResp.Body.Close()
 
 			var pollOp map[string]any
-			json.Unmarshal(opRespBody, &pollOp)
+			if err := json.Unmarshal(opRespBody, &pollOp); err != nil {
+				t.Logf("failed to unmarshal polling response: %v", err)
+				continue
+			}
 
 			if d, ok := pollOp["done"].(bool); ok && d {
 				if errVal, ok := pollOp["error"]; ok && errVal != nil {
@@ -1984,7 +1986,10 @@ func setupDataAgent(t *testing.T, ctx context.Context, projectID, datasetID, tab
 
 		delBody, _ := io.ReadAll(delResp.Body)
 		var delOp map[string]any
-		json.Unmarshal(delBody, &delOp)
+		if err := json.Unmarshal(delBody, &delOp); err != nil {
+			t.Errorf("failed to unmarshal deletion response: %v", err)
+			return
+		}
 		if delOpName, ok := delOp["name"].(string); ok {
 			delTicker := time.NewTicker(2 * time.Second)
 			defer delTicker.Stop()
@@ -2006,7 +2011,9 @@ func setupDataAgent(t *testing.T, ctx context.Context, projectID, datasetID, tab
 					opRespBody, _ := io.ReadAll(opResp.Body)
 					opResp.Body.Close()
 					var pollOp map[string]any
-					json.Unmarshal(opRespBody, &pollOp)
+					if err := json.Unmarshal(opRespBody, &pollOp); err != nil {
+						continue
+					}
 					if d, ok := pollOp["done"].(bool); ok && d {
 						if errVal, ok := pollOp["error"]; ok && errVal != nil {
 							t.Errorf("data agent deletion failed: %v", errVal)
