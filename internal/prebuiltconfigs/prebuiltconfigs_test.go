@@ -25,6 +25,7 @@ var expectedToolSources = []string{
 	"alloydb-postgres-admin",
 	"alloydb-postgres-observability",
 	"alloydb-postgres",
+	"bigquery-conversational-analytics-with-data-agent",
 	"bigquery",
 	"clickhouse",
 	"cloud-healthcare",
@@ -105,6 +106,7 @@ func TestGetPrebuiltTool(t *testing.T) {
 	alloydb_observability_config := getOrFatal(t, "alloydb-postgres-observability")
 	alloydb_config := getOrFatal(t, "alloydb-postgres")
 	bigquery_config := getOrFatal(t, "bigquery")
+	bigquery_ca_config := getOrFatal(t, "bigquery-conversational-analytics-with-data-agent")
 	clickhouse_config := getOrFatal(t, "clickhouse")
 	cloudsqlpg_observability_config := getOrFatal(t, "cloud-sql-postgres-observability")
 	cloudsqlpg_config := getOrFatal(t, "cloud-sql-postgres")
@@ -145,6 +147,9 @@ func TestGetPrebuiltTool(t *testing.T) {
 	}
 	if len(bigquery_config) <= 0 {
 		t.Fatalf("unexpected error: could not fetch bigquery prebuilt tools yaml")
+	}
+	if len(bigquery_ca_config) <= 0 {
+		t.Fatalf("unexpected error: could not fetch bigquery conversational analytics prebuilt tools yaml")
 	}
 	if len(clickhouse_config) <= 0 {
 		t.Fatalf("unexpected error: could not fetch clickhouse prebuilt tools yaml")
