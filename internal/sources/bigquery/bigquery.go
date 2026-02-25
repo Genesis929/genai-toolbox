@@ -86,7 +86,8 @@ type Config struct {
 	Location                  string              `yaml:"location"`
 	WriteMode                 string              `yaml:"writeMode"`
 	AllowedDatasets           StringOrStringSlice `yaml:"allowedDatasets"`
-	UseClientOAuth            bool                `yaml:"useClientOAuth"`
+	UseClientOAuth            string              `yaml:"useClientOAuth"`
+	AuthTokenHeaderName       string              `yaml:"authTokenHeaderName"`
 	ImpersonateServiceAccount string              `yaml:"impersonateServiceAccount"`
 	Scopes                    StringOrStringSlice `yaml:"scopes"`
 	MaxQueryResultRows        int                 `yaml:"maxQueryResultRows"`
@@ -132,7 +133,7 @@ func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.So
 		r.MaxQueryResultRows = 50
 	}
 
-	if r.WriteMode == WriteModeProtected && r.UseClientOAuth {
+	if r.WriteMode == WriteModeProtected && strings.ToLower(r.UseClientOAuth) != "false" && r.UseClientOAuth != "" {
 		// The protected mode only allows write operations to the session's temporary datasets.
 		// when using client OAuth, a new session is created every
 		// time a BigQuery tool is invoked. Therefore, no session data can
@@ -140,7 +141,7 @@ func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.So
 		return nil, fmt.Errorf("writeMode 'protected' cannot be used with useClientOAuth 'true'")
 	}
 
-	if r.UseClientOAuth && r.ImpersonateServiceAccount != "" {
+	if strings.ToLower(r.UseClientOAuth) != "false" && r.UseClientOAuth != "" && r.ImpersonateServiceAccount != "" {
 		return nil, fmt.Errorf("useClientOAuth cannot be used with impersonateServiceAccount")
 	}
 
@@ -151,23 +152,20 @@ func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.So
 	var err error
 
 	s := &Source{
-		Config:             r,
-		Client:             client,
-		RestService:        restService,
-		TokenSource:        tokenSource,
-		MaxQueryResultRows: r.MaxQueryResultRows,
-		ClientCreator:      clientCreator,
+		Config:              r,
+		Client:              client,
+		RestService:         restService,
+		TokenSource:         tokenSource,
+		MaxQueryResultRows:  r.MaxQueryResultRows,
+		ClientCreator:       clientCreator,
+		AuthTokenHeaderName: "Authorization",
 	}
 
-	if r.UseClientOAuth {
-		// use client OAuth
-		baseClientCreator, err := newBigQueryClientCreator(ctx, tracer, r.Project, r.Location, r.Name)
-		if err != nil {
-			return nil, fmt.Errorf("error constructing client creator: %w", err)
-		}
-		setupClientCaching(s, baseClientCreator)
+	if r.AuthTokenHeaderName != "" {
+		s.AuthTokenHeaderName = r.AuthTokenHeaderName
+	}
 
-	} else {
+	if strings.ToLower(r.UseClientOAuth) == "false" || r.UseClientOAuth == "" {
 		// Initializes a BigQuery Google SQL source
 		client, restService, tokenSource, err = initBigQueryConnection(ctx, tracer, r.Name, r.Project, r.Location, r.ImpersonateServiceAccount, r.Scopes)
 		if err != nil {
@@ -176,6 +174,21 @@ func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.So
 		s.Client = client
 		s.RestService = restService
 		s.TokenSource = tokenSource
+
+		if r.WriteMode == WriteModeProtected {
+			// session-based connections
+			s.SessionProvider = s.newBigQuerySessionProvider()
+		}
+	} else {
+		if strings.ToLower(r.UseClientOAuth) != "true" {
+			s.AuthTokenHeaderName = r.UseClientOAuth
+		}
+		// use client OAuth
+		baseClientCreator, err := newBigQueryClientCreator(ctx, tracer, r.Project, r.Location, r.Name)
+		if err != nil {
+			return nil, fmt.Errorf("error constructing client creator: %w", err)
+		}
+		setupClientCaching(s, baseClientCreator)
 	}
 
 	allowedDatasets := make(map[string]struct{})
@@ -280,6 +293,7 @@ type Source struct {
 	Client                    *bigqueryapi.Client
 	RestService               *bigqueryrestapi.Service
 	TokenSource               oauth2.TokenSource
+	AuthTokenHeaderName       string
 	MaxQueryResultRows        int
 	ClientCreator             BigqueryClientCreator
 	AllowedDatasets           map[string]struct{}
@@ -417,7 +431,11 @@ func (s *Source) newBigQuerySessionProvider() BigQuerySessionProvider {
 }
 
 func (s *Source) UseClientAuthorization() bool {
-	return s.UseClientOAuth
+	return strings.ToLower(s.UseClientOAuth) != "false" && s.UseClientOAuth != ""
+}
+
+func (s *Source) GetAuthTokenHeaderName() string {
+	return s.AuthTokenHeaderName
 }
 
 func (s *Source) BigQueryProject() string {
@@ -497,7 +515,7 @@ func (s *Source) lazyInitDataplexClient(ctx context.Context, tracer trace.Tracer
 
 	return func() (*dataplexapi.CatalogClient, DataplexClientCreator, error) {
 		once.Do(func() {
-			c, cc, e := initDataplexConnection(ctx, tracer, s.Name, s.Project, s.UseClientOAuth, s.ImpersonateServiceAccount, s.Scopes)
+			c, cc, e := initDataplexConnection(ctx, tracer, s.Name, s.Project, s.UseClientAuthorization(), s.ImpersonateServiceAccount, s.Scopes)
 			if e != nil {
 				err = fmt.Errorf("failed to initialize dataplex client: %w", e)
 				return
@@ -505,7 +523,7 @@ func (s *Source) lazyInitDataplexClient(ctx context.Context, tracer trace.Tracer
 			client = c
 
 			// If using OAuth, wrap the provided client creator (cc) with caching logic
-			if s.UseClientOAuth && cc != nil {
+			if s.UseClientAuthorization() && cc != nil {
 				clientCreator = func(tokenString string) (*dataplexapi.CatalogClient, error) {
 					// Check cache
 					if val, found := s.dataplexCache.Get(tokenString); found {
