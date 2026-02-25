@@ -87,7 +87,6 @@ type Config struct {
 	WriteMode                 string              `yaml:"writeMode"`
 	AllowedDatasets           StringOrStringSlice `yaml:"allowedDatasets"`
 	UseClientOAuth            string              `yaml:"useClientOAuth"`
-	AuthTokenHeaderName       string              `yaml:"authTokenHeaderName"`
 	ImpersonateServiceAccount string              `yaml:"impersonateServiceAccount"`
 	Scopes                    StringOrStringSlice `yaml:"scopes"`
 	MaxQueryResultRows        int                 `yaml:"maxQueryResultRows"`
@@ -159,10 +158,6 @@ func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.So
 		MaxQueryResultRows:  r.MaxQueryResultRows,
 		ClientCreator:       clientCreator,
 		AuthTokenHeaderName: "Authorization",
-	}
-
-	if r.AuthTokenHeaderName != "" {
-		s.AuthTokenHeaderName = r.AuthTokenHeaderName
 	}
 
 	if strings.ToLower(r.UseClientOAuth) == "false" || r.UseClientOAuth == "" {
