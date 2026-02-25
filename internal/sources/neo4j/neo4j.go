@@ -23,13 +23,13 @@ import (
 	"github.com/googleapis/genai-toolbox/internal/tools/neo4j/neo4jexecutecypher/classifier"
 	"github.com/googleapis/genai-toolbox/internal/tools/neo4j/neo4jschema/helpers"
 	"github.com/googleapis/genai-toolbox/internal/util"
-	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	neo4jconf "github.com/neo4j/neo4j-go-driver/v5/neo4j/config"
+	"github.com/neo4j/neo4j-go-driver/v6/neo4j"
+	neo4jconf "github.com/neo4j/neo4j-go-driver/v6/neo4j/config"
 
 	"go.opentelemetry.io/otel/trace"
 )
 
-const SourceKind string = "neo4j"
+const SourceType string = "neo4j"
 
 var sourceClassifier *classifier.QueryClassifier = classifier.NewQueryClassifier()
 
@@ -37,8 +37,8 @@ var sourceClassifier *classifier.QueryClassifier = classifier.NewQueryClassifier
 var _ sources.SourceConfig = Config{}
 
 func init() {
-	if !sources.Register(SourceKind, newConfig) {
-		panic(fmt.Sprintf("source kind %q already registered", SourceKind))
+	if !sources.Register(SourceType, newConfig) {
+		panic(fmt.Sprintf("source type %q already registered", SourceType))
 	}
 }
 
@@ -52,15 +52,15 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (sources
 
 type Config struct {
 	Name     string `yaml:"name" validate:"required"`
-	Kind     string `yaml:"kind" validate:"required"`
+	Type     string `yaml:"type" validate:"required"`
 	Uri      string `yaml:"uri" validate:"required"`
 	User     string `yaml:"user" validate:"required"`
 	Password string `yaml:"password" validate:"required"`
 	Database string `yaml:"database" validate:"required"`
 }
 
-func (r Config) SourceConfigKind() string {
-	return SourceKind
+func (r Config) SourceConfigType() string {
+	return SourceType
 }
 
 func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.Source, error) {
@@ -88,18 +88,18 @@ var _ sources.Source = &Source{}
 
 type Source struct {
 	Config
-	Driver neo4j.DriverWithContext
+	Driver neo4j.Driver
 }
 
-func (s *Source) SourceKind() string {
-	return SourceKind
+func (s *Source) SourceType() string {
+	return SourceType
 }
 
 func (s *Source) ToConfig() sources.SourceConfig {
 	return s.Config
 }
 
-func (s *Source) Neo4jDriver() neo4j.DriverWithContext {
+func (s *Source) Neo4jDriver() neo4j.Driver {
 	return s.Driver
 }
 
@@ -136,7 +136,7 @@ func (s *Source) RunQuery(ctx context.Context, cypherStr string, params map[stri
 		plan := summary.Plan()
 		execPlan := map[string]any{
 			"queryType":     cf.Type.String(),
-			"statementType": summary.StatementType(),
+			"statementType": summary.QueryType(),
 			"operator":      plan.Operator(),
 			"arguments":     plan.Arguments(),
 			"identifiers":   plan.Identifiers(),
@@ -180,9 +180,9 @@ func addPlanChildren(p neo4j.Plan) []map[string]any {
 	return children
 }
 
-func initNeo4jDriver(ctx context.Context, tracer trace.Tracer, uri, user, password, name string) (neo4j.DriverWithContext, error) {
+func initNeo4jDriver(ctx context.Context, tracer trace.Tracer, uri, user, password, name string) (neo4j.Driver, error) {
 	//nolint:all // Reassigned ctx
-	ctx, span := sources.InitConnectionSpan(ctx, tracer, SourceKind, name)
+	ctx, span := sources.InitConnectionSpan(ctx, tracer, SourceType, name)
 	defer span.End()
 
 	auth := neo4j.BasicAuth(user, password, "")
@@ -190,7 +190,7 @@ func initNeo4jDriver(ctx context.Context, tracer trace.Tracer, uri, user, passwo
 	if err != nil {
 		return nil, err
 	}
-	driver, err := neo4j.NewDriverWithContext(uri, auth, func(config *neo4jconf.Config) {
+	driver, err := neo4j.NewDriver(uri, auth, func(config *neo4jconf.Config) {
 		config.UserAgent = userAgent
 	})
 	if err != nil {

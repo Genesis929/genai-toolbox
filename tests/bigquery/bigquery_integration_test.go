@@ -41,8 +41,8 @@ import (
 )
 
 var (
-	BigquerySourceKind = "bigquery"
-	BigqueryToolKind   = "bigquery-sql"
+	BigquerySourceType = "bigquery"
+	BigqueryToolType   = "bigquery-sql"
 	BigqueryProject    = os.Getenv("BIGQUERY_PROJECT")
 )
 
@@ -53,7 +53,7 @@ func getBigQueryVars(t *testing.T) map[string]any {
 	}
 
 	return map[string]any{
-		"kind":    BigquerySourceKind,
+		"type":    BigquerySourceType,
 		"project": BigqueryProject,
 	}
 }
@@ -146,12 +146,12 @@ func TestBigQueryToolEndpoints(t *testing.T) {
 	defer teardownTable5(t)
 
 	// Write config into a file and pass it to command
-	toolsFile := tests.GetToolsConfig(sourceConfig, BigqueryToolKind, paramToolStmt, idParamToolStmt, nameParamToolStmt, arrayToolStmt, authToolStmt)
+	toolsFile := tests.GetToolsConfig(sourceConfig, BigqueryToolType, paramToolStmt, idParamToolStmt, nameParamToolStmt, arrayToolStmt, authToolStmt)
 	toolsFile = addClientAuthSourceConfig(t, toolsFile)
 	toolsFile = addBigQuerySqlToolConfig(t, toolsFile, dataTypeToolStmt, arrayDataTypeToolStmt)
 	toolsFile = addBigQueryPrebuiltToolsConfig(t, toolsFile)
 	tmplSelectCombined, tmplSelectFilterCombined := getBigQueryTmplToolStatement()
-	toolsFile = tests.AddTemplateParamConfig(t, toolsFile, BigqueryToolKind, tmplSelectCombined, tmplSelectFilterCombined, "")
+	toolsFile = tests.AddTemplateParamConfig(t, toolsFile, BigqueryToolType, tmplSelectCombined, tmplSelectFilterCombined, "")
 
 	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile, args...)
 	if err != nil {
@@ -175,7 +175,7 @@ func TestBigQueryToolEndpoints(t *testing.T) {
 	ddlWant := `"Query executed successfully and returned no content."`
 	dataInsightsWant := `(?s)Schema Resolved.*Retrieval Query.*SQL Generated.*Answer`
 	// Partial message; the full error message is too long.
-	mcpMyFailToolWant := `{"jsonrpc":"2.0","id":"invoke-fail-tool","result":{"content":[{"type":"text","text":"query validation failed: failed to insert dry run job: googleapi: Error 400: Syntax error: Unexpected identifier \"SELEC\" at [1:1]`
+	mcpMyFailToolWant := `{"jsonrpc":"2.0","id":"invoke-fail-tool","result":{"content":[{"type":"text","text":"error processing GCP request: failed to insert dry run job: googleapi: Error 400: Syntax error: Unexpected identifier \"SELEC\" at [1:1]`
 	mcpSelect1Want := `{"jsonrpc":"2.0","id":"invoke my-auth-required-tool","result":{"content":[{"type":"text","text":"{\"f0_\":1}"}]}}`
 	createColArray := `["id INT64", "name STRING", "age INT64"]`
 	selectEmptyWant := `"The query returned 0 rows."`
@@ -286,42 +286,42 @@ func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
 	// Configure tool
 	toolsConfig := map[string]any{
 		"list-dataset-ids-restricted": map[string]any{
-			"kind":        "bigquery-list-dataset-ids",
+			"type":        "bigquery-list-dataset-ids",
 			"source":      "my-instance",
 			"description": "Tool to list dataset ids",
 		},
 		"list-table-ids-restricted": map[string]any{
-			"kind":        "bigquery-list-table-ids",
+			"type":        "bigquery-list-table-ids",
 			"source":      "my-instance",
 			"description": "Tool to list table within a dataset",
 		},
 		"get-dataset-info-restricted": map[string]any{
-			"kind":        "bigquery-get-dataset-info",
+			"type":        "bigquery-get-dataset-info",
 			"source":      "my-instance",
 			"description": "Tool to get dataset info",
 		},
 		"get-table-info-restricted": map[string]any{
-			"kind":        "bigquery-get-table-info",
+			"type":        "bigquery-get-table-info",
 			"source":      "my-instance",
 			"description": "Tool to get table info",
 		},
 		"execute-sql-restricted": map[string]any{
-			"kind":        "bigquery-execute-sql",
+			"type":        "bigquery-execute-sql",
 			"source":      "my-instance",
 			"description": "Tool to execute SQL",
 		},
 		"conversational-analytics-restricted": map[string]any{
-			"kind":        "bigquery-conversational-analytics",
+			"type":        "bigquery-conversational-analytics",
 			"source":      "my-instance",
 			"description": "Tool to ask BigQuery conversational analytics",
 		},
 		"forecast-restricted": map[string]any{
-			"kind":        "bigquery-forecast",
+			"type":        "bigquery-forecast",
 			"source":      "my-instance",
 			"description": "Tool to forecast",
 		},
 		"analyze-contribution-restricted": map[string]any{
-			"kind":        "bigquery-analyze-contribution",
+			"type":        "bigquery-analyze-contribution",
 			"source":      "my-instance",
 			"description": "Tool to analyze contribution",
 		},
@@ -492,9 +492,9 @@ func TestBigQueryAuthorizedViewWithRestriction(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusBadRequest {
+		if resp.StatusCode != http.StatusOK {
 			bodyBytes, _ := io.ReadAll(resp.Body)
-			t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, http.StatusBadRequest, string(bodyBytes))
+			t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, http.StatusOK, string(bodyBytes))
 		}
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		if !strings.Contains(string(bodyBytes), fmt.Sprintf("query explicitly accesses dataset '%s.%s', which is not in the allowed list", BigqueryProject, disallowedDatasetName)) {
@@ -533,7 +533,7 @@ func TestBigQueryWriteModeAllowed(t *testing.T) {
 		},
 		"tools": map[string]any{
 			"my-exec-sql-tool": map[string]any{
-				"kind":        "bigquery-execute-sql",
+				"type":        "bigquery-execute-sql",
 				"source":      "my-instance",
 				"description": "Tool to execute sql",
 			},
@@ -579,7 +579,7 @@ func TestBigQueryWriteModeBlocked(t *testing.T) {
 	toolsFile := map[string]any{
 		"sources": map[string]any{"my-instance": sourceConfig},
 		"tools": map[string]any{
-			"my-exec-sql-tool": map[string]any{"kind": "bigquery-execute-sql", "source": "my-instance", "description": "Tool to execute sql"},
+			"my-exec-sql-tool": map[string]any{"type": "bigquery-execute-sql", "source": "my-instance", "description": "Tool to execute sql"},
 		},
 	}
 
@@ -625,20 +625,20 @@ func TestBigQueryWriteModeProtected(t *testing.T) {
 	toolsFile := map[string]any{
 		"sources": map[string]any{"my-instance": sourceConfig},
 		"tools": map[string]any{
-			"my-exec-sql-tool": map[string]any{"kind": "bigquery-execute-sql", "source": "my-instance", "description": "Tool to execute sql"},
+			"my-exec-sql-tool": map[string]any{"type": "bigquery-execute-sql", "source": "my-instance", "description": "Tool to execute sql"},
 			"my-sql-tool-protected": map[string]any{
-				"kind":        "bigquery-sql",
+				"type":        "bigquery-sql",
 				"source":      "my-instance",
 				"description": "Tool to query from the session",
 				"statement":   "SELECT * FROM my_shared_temp_table",
 			},
 			"my-forecast-tool-protected": map[string]any{
-				"kind":        "bigquery-forecast",
+				"type":        "bigquery-forecast",
 				"source":      "my-instance",
 				"description": "Tool to forecast from session temp table",
 			},
 			"my-analyze-contribution-tool-protected": map[string]any{
-				"kind":        "bigquery-analyze-contribution",
+				"type":        "bigquery-analyze-contribution",
 				"source":      "my-instance",
 				"description": "Tool to analyze contribution from session temp table",
 			},
@@ -662,7 +662,7 @@ func TestBigQueryWriteModeProtected(t *testing.T) {
 	runBigQueryWriteModeProtectedTest(t, permanentDatasetName)
 }
 
-// getBigQueryParamToolInfo returns statements and param for my-tool for bigquery kind
+// getBigQueryParamToolInfo returns statements and param for my-tool for bigquery type
 func getBigQueryParamToolInfo(tableName string) (string, string, string, string, string, string, []bigqueryapi.QueryParameter) {
 	createStatement := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (id INT64, name STRING);`, tableName)
@@ -681,7 +681,7 @@ func getBigQueryParamToolInfo(tableName string) (string, string, string, string,
 	return createStatement, insertStatement, toolStatement, idToolStatement, nameToolStatement, arrayToolStatememt, params
 }
 
-// getBigQueryAuthToolInfo returns statements and param of my-auth-tool for bigquery kind
+// getBigQueryAuthToolInfo returns statements and param of my-auth-tool for bigquery type
 func getBigQueryAuthToolInfo(tableName string) (string, string, string, []bigqueryapi.QueryParameter) {
 	createStatement := fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (id INT64, name STRING, email STRING)`, tableName)
@@ -751,7 +751,7 @@ func getBigQueryAnalyzeContributionToolInfo(tableName string) (string, string, [
 	return createStatement, insertStatement, params
 }
 
-// getBigQueryTmplToolStatement returns statements for template parameter test cases for bigquery kind
+// getBigQueryTmplToolStatement returns statements for template parameter test cases for bigquery type
 func getBigQueryTmplToolStatement() (string, string) {
 	tmplSelectCombined := "SELECT * FROM {{.tableName}} WHERE id = ? ORDER BY id"
 	tmplSelectFilterCombined := "SELECT * FROM {{.tableName}} WHERE {{.columnFilter}} = ? ORDER BY id"
@@ -843,12 +843,12 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		t.Fatalf("unable to get tools from config")
 	}
 	tools["my-exec-sql-tool"] = map[string]any{
-		"kind":        "bigquery-execute-sql",
+		"type":        "bigquery-execute-sql",
 		"source":      "my-instance",
 		"description": "Tool to execute sql",
 	}
 	tools["my-auth-exec-sql-tool"] = map[string]any{
-		"kind":        "bigquery-execute-sql",
+		"type":        "bigquery-execute-sql",
 		"source":      "my-instance",
 		"description": "Tool to execute sql",
 		"authRequired": []string{
@@ -856,17 +856,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-exec-sql-tool"] = map[string]any{
-		"kind":        "bigquery-execute-sql",
+		"type":        "bigquery-execute-sql",
 		"source":      "my-client-auth-source",
 		"description": "Tool to execute sql",
 	}
 	tools["my-forecast-tool"] = map[string]any{
-		"kind":        "bigquery-forecast",
+		"type":        "bigquery-forecast",
 		"source":      "my-instance",
 		"description": "Tool to forecast time series data.",
 	}
 	tools["my-auth-forecast-tool"] = map[string]any{
-		"kind":        "bigquery-forecast",
+		"type":        "bigquery-forecast",
 		"source":      "my-instance",
 		"description": "Tool to forecast time series data with auth.",
 		"authRequired": []string{
@@ -874,17 +874,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-forecast-tool"] = map[string]any{
-		"kind":        "bigquery-forecast",
+		"type":        "bigquery-forecast",
 		"source":      "my-client-auth-source",
 		"description": "Tool to forecast time series data with auth.",
 	}
 	tools["my-analyze-contribution-tool"] = map[string]any{
-		"kind":        "bigquery-analyze-contribution",
+		"type":        "bigquery-analyze-contribution",
 		"source":      "my-instance",
 		"description": "Tool to analyze contribution.",
 	}
 	tools["my-auth-analyze-contribution-tool"] = map[string]any{
-		"kind":        "bigquery-analyze-contribution",
+		"type":        "bigquery-analyze-contribution",
 		"source":      "my-instance",
 		"description": "Tool to analyze contribution with auth.",
 		"authRequired": []string{
@@ -892,17 +892,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-analyze-contribution-tool"] = map[string]any{
-		"kind":        "bigquery-analyze-contribution",
+		"type":        "bigquery-analyze-contribution",
 		"source":      "my-client-auth-source",
 		"description": "Tool to analyze contribution with auth.",
 	}
 	tools["my-list-dataset-ids-tool"] = map[string]any{
-		"kind":        "bigquery-list-dataset-ids",
+		"type":        "bigquery-list-dataset-ids",
 		"source":      "my-instance",
 		"description": "Tool to list dataset",
 	}
 	tools["my-auth-list-dataset-ids-tool"] = map[string]any{
-		"kind":        "bigquery-list-dataset-ids",
+		"type":        "bigquery-list-dataset-ids",
 		"source":      "my-instance",
 		"description": "Tool to list dataset",
 		"authRequired": []string{
@@ -910,17 +910,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-list-dataset-ids-tool"] = map[string]any{
-		"kind":        "bigquery-list-dataset-ids",
+		"type":        "bigquery-list-dataset-ids",
 		"source":      "my-client-auth-source",
 		"description": "Tool to list dataset",
 	}
 	tools["my-get-dataset-info-tool"] = map[string]any{
-		"kind":        "bigquery-get-dataset-info",
+		"type":        "bigquery-get-dataset-info",
 		"source":      "my-instance",
 		"description": "Tool to show dataset metadata",
 	}
 	tools["my-auth-get-dataset-info-tool"] = map[string]any{
-		"kind":        "bigquery-get-dataset-info",
+		"type":        "bigquery-get-dataset-info",
 		"source":      "my-instance",
 		"description": "Tool to show dataset metadata",
 		"authRequired": []string{
@@ -928,17 +928,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-get-dataset-info-tool"] = map[string]any{
-		"kind":        "bigquery-get-dataset-info",
+		"type":        "bigquery-get-dataset-info",
 		"source":      "my-client-auth-source",
 		"description": "Tool to show dataset metadata",
 	}
 	tools["my-list-table-ids-tool"] = map[string]any{
-		"kind":        "bigquery-list-table-ids",
+		"type":        "bigquery-list-table-ids",
 		"source":      "my-instance",
 		"description": "Tool to list table within a dataset",
 	}
 	tools["my-auth-list-table-ids-tool"] = map[string]any{
-		"kind":        "bigquery-list-table-ids",
+		"type":        "bigquery-list-table-ids",
 		"source":      "my-instance",
 		"description": "Tool to list table within a dataset",
 		"authRequired": []string{
@@ -946,17 +946,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-list-table-ids-tool"] = map[string]any{
-		"kind":        "bigquery-list-table-ids",
+		"type":        "bigquery-list-table-ids",
 		"source":      "my-client-auth-source",
 		"description": "Tool to list table within a dataset",
 	}
 	tools["my-get-table-info-tool"] = map[string]any{
-		"kind":        "bigquery-get-table-info",
+		"type":        "bigquery-get-table-info",
 		"source":      "my-instance",
 		"description": "Tool to show dataset metadata",
 	}
 	tools["my-auth-get-table-info-tool"] = map[string]any{
-		"kind":        "bigquery-get-table-info",
+		"type":        "bigquery-get-table-info",
 		"source":      "my-instance",
 		"description": "Tool to show dataset metadata",
 		"authRequired": []string{
@@ -964,17 +964,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-get-table-info-tool"] = map[string]any{
-		"kind":        "bigquery-get-table-info",
+		"type":        "bigquery-get-table-info",
 		"source":      "my-client-auth-source",
 		"description": "Tool to show dataset metadata",
 	}
 	tools["my-conversational-analytics-tool"] = map[string]any{
-		"kind":        "bigquery-conversational-analytics",
+		"type":        "bigquery-conversational-analytics",
 		"source":      "my-instance",
 		"description": "Tool to ask BigQuery conversational analytics",
 	}
 	tools["my-auth-conversational-analytics-tool"] = map[string]any{
-		"kind":        "bigquery-conversational-analytics",
+		"type":        "bigquery-conversational-analytics",
 		"source":      "my-instance",
 		"description": "Tool to ask BigQuery conversational analytics",
 		"authRequired": []string{
@@ -982,17 +982,17 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-conversational-analytics-tool"] = map[string]any{
-		"kind":        "bigquery-conversational-analytics",
+		"type":        "bigquery-conversational-analytics",
 		"source":      "my-client-auth-source",
 		"description": "Tool to ask BigQuery conversational analytics",
 	}
 	tools["my-search-catalog-tool"] = map[string]any{
-		"kind":        "bigquery-search-catalog",
+		"type":        "bigquery-search-catalog",
 		"source":      "my-instance",
 		"description": "Tool to search the BiqQuery catalog",
 	}
 	tools["my-auth-search-catalog-tool"] = map[string]any{
-		"kind":        "bigquery-search-catalog",
+		"type":        "bigquery-search-catalog",
 		"source":      "my-instance",
 		"description": "Tool to search the BiqQuery catalog",
 		"authRequired": []string{
@@ -1000,7 +1000,7 @@ func addBigQueryPrebuiltToolsConfig(t *testing.T, config map[string]any) map[str
 		},
 	}
 	tools["my-client-auth-search-catalog-tool"] = map[string]any{
-		"kind":        "bigquery-search-catalog",
+		"type":        "bigquery-search-catalog",
 		"source":      "my-client-auth-source",
 		"description": "Tool to search the BiqQuery catalog",
 	}
@@ -1014,7 +1014,7 @@ func addClientAuthSourceConfig(t *testing.T, config map[string]any) map[string]a
 		t.Fatalf("unable to get sources from config")
 	}
 	sources["my-client-auth-source"] = map[string]any{
-		"kind":           BigquerySourceKind,
+		"type":           BigquerySourceType,
 		"project":        BigqueryProject,
 		"useClientOAuth": true,
 	}
@@ -1028,7 +1028,7 @@ func addBigQuerySqlToolConfig(t *testing.T, config map[string]any, toolStatement
 		t.Fatalf("unable to get tools from config")
 	}
 	tools["my-scalar-datatype-tool"] = map[string]any{
-		"kind":        "bigquery-sql",
+		"type":        "bigquery-sql",
 		"source":      "my-instance",
 		"description": "Tool to test various scalar data types.",
 		"statement":   toolStatement,
@@ -1040,7 +1040,7 @@ func addBigQuerySqlToolConfig(t *testing.T, config map[string]any, toolStatement
 		},
 	}
 	tools["my-array-datatype-tool"] = map[string]any{
-		"kind":        "bigquery-sql",
+		"type":        "bigquery-sql",
 		"source":      "my-instance",
 		"description": "Tool to test various array data types.",
 		"statement":   arrayToolStatement,
@@ -1052,7 +1052,7 @@ func addBigQuerySqlToolConfig(t *testing.T, config map[string]any, toolStatement
 		},
 	}
 	tools["my-client-auth-tool"] = map[string]any{
-		"kind":        "bigquery-sql",
+		"type":        "bigquery-sql",
 		"source":      "my-client-auth-source",
 		"description": "Tool to test client authorization.",
 		"statement":   "SELECT 1",
@@ -1089,7 +1089,8 @@ func runBigQueryExecuteSqlToolInvokeTest(t *testing.T, select1Want, invokeParamW
 			api:           "http://127.0.0.1:5000/api/tool/my-exec-sql-tool/invoke",
 			requestHeader: map[string]string{},
 			requestBody:   bytes.NewBuffer([]byte(`{}`)),
-			isErr:         true,
+			want:          `{"error":"parameter \"sql\" is required"}`,
+			isErr:         false,
 		},
 		{
 			name:          "invoke my-exec-sql-tool",
@@ -1144,6 +1145,7 @@ func runBigQueryExecuteSqlToolInvokeTest(t *testing.T, select1Want, invokeParamW
 			api:           "http://127.0.0.1:5000/api/tool/my-exec-sql-tool/invoke",
 			requestHeader: map[string]string{},
 			requestBody:   bytes.NewBuffer([]byte(`{}`)),
+			want:          `{"error":"parameter \"sql\" is required"}`,
 			isErr:         true,
 		},
 		{
@@ -1296,12 +1298,11 @@ func runBigQueryWriteModeBlockedTest(t *testing.T, tableNameParam, datasetName s
 		name           string
 		sql            string
 		wantStatusCode int
-		wantInError    string
 		wantResult     string
 	}{
-		{"SELECT statement should succeed", fmt.Sprintf("SELECT id, name FROM %s WHERE id = 1", tableNameParam), http.StatusOK, "", `[{"id":1,"name":"Alice"}]`},
-		{"INSERT statement should fail", fmt.Sprintf("INSERT INTO %s (id, name) VALUES (10, 'test')", tableNameParam), http.StatusBadRequest, "write mode is 'blocked', only SELECT statements are allowed", ""},
-		{"CREATE TABLE statement should fail", fmt.Sprintf("CREATE TABLE %s.new_table (x INT64)", datasetName), http.StatusBadRequest, "write mode is 'blocked', only SELECT statements are allowed", ""},
+		{"SELECT statement should succeed", fmt.Sprintf("SELECT id, name FROM %s WHERE id = 1", tableNameParam), http.StatusOK, `[{"id":1,"name":"Alice"}]`},
+		{"INSERT statement should fail", fmt.Sprintf("INSERT INTO %s (id, name) VALUES (10, 'test')", tableNameParam), http.StatusOK, "{\"error\":\"write mode is 'blocked', only SELECT statements are allowed\"}"},
+		{"CREATE TABLE statement should fail", fmt.Sprintf("CREATE TABLE %s.new_table (x INT64)", datasetName), http.StatusOK, "{\"error\":\"write mode is 'blocked', only SELECT statements are allowed\"}"},
 	}
 
 	for _, tc := range testCases {
@@ -1315,15 +1316,6 @@ func runBigQueryWriteModeBlockedTest(t *testing.T, tableNameParam, datasetName s
 				t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, tc.wantStatusCode, string(bodyBytes))
 			}
 
-			if tc.wantInError != "" {
-				errStr, ok := result["error"].(string)
-				if !ok {
-					t.Fatalf("expected 'error' field in response, got %v", result)
-				}
-				if !strings.Contains(errStr, tc.wantInError) {
-					t.Fatalf("expected error message to contain %q, but got %q", tc.wantInError, errStr)
-				}
-			}
 			if tc.wantResult != "" {
 				resStr, ok := result["result"].(string)
 				if !ok {
@@ -1350,9 +1342,9 @@ func runBigQueryWriteModeProtectedTest(t *testing.T, permanentDatasetName string
 			name:           "CREATE TABLE to permanent dataset should fail",
 			toolName:       "my-exec-sql-tool",
 			requestBody:    fmt.Sprintf(`{"sql": "CREATE TABLE %s.new_table (x INT64)"}`, permanentDatasetName),
-			wantStatusCode: http.StatusBadRequest,
-			wantInError:    "protected write mode only supports SELECT statements, or write operations in the anonymous dataset",
-			wantResult:     "",
+			wantStatusCode: http.StatusOK,
+			wantInError:    "",
+			wantResult:     "protected write mode only supports SELECT statements, or write operations in the anonymous dataset",
 		},
 		{
 			name:           "CREATE TEMP TABLE should succeed",
@@ -1844,7 +1836,8 @@ func runBigQueryDataTypeTests(t *testing.T) {
 			api:           "http://127.0.0.1:5000/api/tool/my-scalar-datatype-tool/invoke",
 			requestHeader: map[string]string{},
 			requestBody:   bytes.NewBuffer([]byte(`{"int_val": 123}`)),
-			isErr:         true,
+			want:          `{"error":"parameter \"string_val\" is required"}`,
+			isErr:         false,
 		},
 		{
 			name:          "invoke my-array-datatype-tool",
@@ -1942,7 +1935,7 @@ func runBigQueryListDatasetToolInvokeTest(t *testing.T, datasetWant string) {
 			name:          "invoke my-list-dataset-ids-tool with non-existent project",
 			api:           "http://127.0.0.1:5000/api/tool/my-auth-list-dataset-ids-tool/invoke",
 			requestHeader: map[string]string{"my-google-auth_token": idToken},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s-%s\"}", BigqueryProject, uuid.NewString()))),
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s\"}", BigqueryProject+"-nonexistent"))),
 			isErr:         true,
 		},
 		{
@@ -2071,7 +2064,7 @@ func runBigQueryGetDatasetInfoToolInvokeTest(t *testing.T, datasetName, datasetI
 			name:          "Invoke my-auth-get-dataset-info-tool with non-existent project",
 			api:           "http://127.0.0.1:5000/api/tool/my-auth-get-dataset-info-tool/invoke",
 			requestHeader: map[string]string{"my-google-auth_token": idToken},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s-%s\", \"dataset\":\"%s\"}", BigqueryProject, uuid.NewString(), datasetName))),
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s\", \"dataset\":\"%s\"}", BigqueryProject+"-nonexistent", datasetName))),
 			isErr:         true,
 		},
 		{
@@ -2236,7 +2229,7 @@ func runBigQueryListTableIdsToolInvokeTest(t *testing.T, datasetName, tablename_
 			name:          "Invoke my-auth-list-table-ids-tool with non-existent project",
 			api:           "http://127.0.0.1:5000/api/tool/my-auth-list-table-ids-tool/invoke",
 			requestHeader: map[string]string{"my-google-auth_token": idToken},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s-%s\", \"dataset\":\"%s\"}", BigqueryProject, uuid.NewString(), datasetName))),
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s\", \"dataset\":\"%s\"}", BigqueryProject+"-nonexistent", datasetName))),
 			isErr:         true,
 		},
 		{
@@ -2386,7 +2379,7 @@ func runBigQueryGetTableInfoToolInvokeTest(t *testing.T, datasetName, tableName,
 			name:          "Invoke my-auth-get-table-info-tool with non-existent project",
 			api:           "http://127.0.0.1:5000/api/tool/my-auth-get-table-info-tool/invoke",
 			requestHeader: map[string]string{"my-google-auth_token": idToken},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s-%s\", \"dataset\":\"%s\", \"table\":\"%s\"}", BigqueryProject, uuid.NewString(), datasetName, tableName))),
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"project\":\"%s\", \"dataset\":\"%s\", \"table\":\"%s\"}", BigqueryProject+"-nonexistent", datasetName, tableName))),
 			isErr:         true,
 		},
 		{
@@ -2713,7 +2706,7 @@ func runListTableIdsWithRestriction(t *testing.T, allowedDatasetName, disallowed
 		{
 			name:           "invoke on disallowed dataset",
 			dataset:        disallowedDatasetName,
-			wantStatusCode: http.StatusBadRequest, // Or the specific error code returned
+			wantStatusCode: http.StatusOK,
 			wantInError:    fmt.Sprintf("access denied to dataset '%s'", disallowedDatasetName),
 		},
 	}
@@ -2732,9 +2725,9 @@ func runListTableIdsWithRestriction(t *testing.T, allowedDatasetName, disallowed
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != tc.wantStatusCode {
+			if resp.StatusCode != http.StatusOK {
 				bodyBytes, _ := io.ReadAll(resp.Body)
-				t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, tc.wantStatusCode, string(bodyBytes))
+				t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, http.StatusOK, string(bodyBytes))
 			}
 
 			if tc.wantInResult != "" {
@@ -2763,9 +2756,16 @@ func runListTableIdsWithRestriction(t *testing.T, allowedDatasetName, disallowed
 			}
 
 			if tc.wantInError != "" {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				if !strings.Contains(string(bodyBytes), tc.wantInError) {
-					t.Errorf("unexpected error message: got %q, want to contain %q", string(bodyBytes), tc.wantInError)
+				var respBody map[string]interface{}
+				if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+					t.Fatalf("error parsing response body: %v", err)
+				}
+				got, ok := respBody["result"].(string)
+				if !ok {
+					t.Fatalf("unable to find result in response body")
+				}
+				if !strings.Contains(got, tc.wantInError) {
+					t.Errorf("unexpected error message: got %q, want to contain %q", got, tc.wantInError)
 				}
 			}
 		})
@@ -2787,7 +2787,7 @@ func runGetDatasetInfoWithRestriction(t *testing.T, allowedDatasetName, disallow
 		{
 			name:           "invoke on disallowed dataset",
 			dataset:        disallowedDatasetName,
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    fmt.Sprintf("access denied to dataset '%s'", disallowedDatasetName),
 		},
 	}
@@ -2806,15 +2806,22 @@ func runGetDatasetInfoWithRestriction(t *testing.T, allowedDatasetName, disallow
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != tc.wantStatusCode {
+			if resp.StatusCode != http.StatusOK {
 				bodyBytes, _ := io.ReadAll(resp.Body)
-				t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, tc.wantStatusCode, string(bodyBytes))
+				t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, http.StatusOK, string(bodyBytes))
 			}
 
 			if tc.wantInError != "" {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				if !strings.Contains(string(bodyBytes), tc.wantInError) {
-					t.Errorf("unexpected error message: got %q, want to contain %q", string(bodyBytes), tc.wantInError)
+				var respBody map[string]interface{}
+				if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+					t.Fatalf("error parsing response body: %v", err)
+				}
+				got, ok := respBody["result"].(string)
+				if !ok {
+					t.Fatalf("unable to find result in response body")
+				}
+				if !strings.Contains(got, tc.wantInError) {
+					t.Errorf("unexpected error message: got %q, want to contain %q", got, tc.wantInError)
 				}
 			}
 		})
@@ -2839,8 +2846,7 @@ func runGetTableInfoWithRestriction(t *testing.T, allowedDatasetName, disallowed
 			name:           "invoke on disallowed table",
 			dataset:        disallowedDatasetName,
 			table:          disallowedTableName,
-			wantStatusCode: http.StatusBadRequest,
-			wantInError:    fmt.Sprintf("access denied to dataset '%s'", disallowedDatasetName),
+			wantStatusCode: http.StatusOK,
 		},
 	}
 
@@ -2858,15 +2864,22 @@ func runGetTableInfoWithRestriction(t *testing.T, allowedDatasetName, disallowed
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != tc.wantStatusCode {
+			if resp.StatusCode != http.StatusOK {
 				bodyBytes, _ := io.ReadAll(resp.Body)
-				t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, tc.wantStatusCode, string(bodyBytes))
+				t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, http.StatusOK, string(bodyBytes))
 			}
 
 			if tc.wantInError != "" {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				if !strings.Contains(string(bodyBytes), tc.wantInError) {
-					t.Errorf("unexpected error message: got %q, want to contain %q", string(bodyBytes), tc.wantInError)
+				var respBody map[string]interface{}
+				if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+					t.Fatalf("error parsing response body: %v", err)
+				}
+				got, ok := respBody["result"].(string)
+				if !ok {
+					t.Fatalf("unable to find result in response body")
+				}
+				if !strings.Contains(got, tc.wantInError) {
+					t.Errorf("unexpected error message: got %q, want to contain %q", got, tc.wantInError)
 				}
 			}
 		})
@@ -2894,7 +2907,7 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 		{
 			name:           "invoke on disallowed table",
 			sql:            fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError: fmt.Sprintf("query explicitly accesses dataset '%s', which is not in the allowed list",
 				strings.Join(
 					strings.Split(strings.Trim(disallowedTableFullName, "`"), ".")[0:2],
@@ -2903,31 +2916,31 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 		{
 			name:           "disallowed create schema",
 			sql:            "CREATE SCHEMA another_dataset",
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    "dataset-level operations like 'CREATE_SCHEMA' are not allowed",
 		},
 		{
 			name:           "disallowed alter schema",
 			sql:            fmt.Sprintf("ALTER SCHEMA %s SET OPTIONS(description='new one')", allowedDatasetID),
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    "dataset-level operations like 'ALTER_SCHEMA' are not allowed",
 		},
 		{
 			name:           "disallowed create function",
 			sql:            fmt.Sprintf("CREATE FUNCTION %s.my_func() RETURNS INT64 AS (1)", allowedDatasetID),
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    "creating stored routines ('CREATE_FUNCTION') is not allowed",
 		},
 		{
 			name:           "disallowed create procedure",
 			sql:            fmt.Sprintf("CREATE PROCEDURE %s.my_proc() BEGIN SELECT 1; END", allowedDatasetID),
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    "not allowed",
 		},
 		{
 			name:           "disallowed execute immediate",
 			sql:            "EXECUTE IMMEDIATE 'SELECT 1'",
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    "not allowed",
 		},
 	}
@@ -2952,9 +2965,16 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 			}
 
 			if tc.wantInError != "" {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				if !strings.Contains(string(bodyBytes), tc.wantInError) {
-					t.Errorf("unexpected error message: got %q, want to contain %q", string(bodyBytes), tc.wantInError)
+				var respBody map[string]interface{}
+				if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+					t.Fatalf("error parsing response body: %v", err)
+				}
+				got, ok := respBody["result"].(string)
+				if !ok {
+					t.Fatalf("unable to find result in response body")
+				}
+				if !strings.Contains(got, tc.wantInError) {
+					t.Errorf("unexpected error message: got %q, want to contain %q", got, tc.wantInError)
 				}
 			}
 		})
@@ -2981,7 +3001,7 @@ func runConversationalAnalyticsWithRestriction(t *testing.T, allowedDatasetName,
 		{
 			name:           "invoke with disallowed table",
 			tableRefs:      disallowedTableRefsJSON,
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    fmt.Sprintf("access to dataset '%s.%s' (from table '%s') is not allowed", BigqueryProject, disallowedDatasetName, disallowedTableName),
 		},
 	}
@@ -3029,9 +3049,16 @@ func runConversationalAnalyticsWithRestriction(t *testing.T, allowedDatasetName,
 			}
 
 			if tc.wantInError != "" {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				if !strings.Contains(string(bodyBytes), tc.wantInError) {
-					t.Errorf("unexpected error message: got %q, want to contain %q", string(bodyBytes), tc.wantInError)
+				var respBody map[string]interface{}
+				if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+					t.Fatalf("error parsing response body: %v", err)
+				}
+				got, ok := respBody["result"].(string)
+				if !ok {
+					t.Fatalf("unable to find result in response body")
+				}
+				if !strings.Contains(got, tc.wantInError) {
+					t.Errorf("unexpected error message: got %q, want to contain %q", got, tc.wantInError)
 				}
 			}
 		})
@@ -3096,7 +3123,7 @@ func runBigQuerySearchCatalogToolInvokeTest(t *testing.T, datasetName string, ta
 			name:          "Invoke my-auth-search-catalog-tool with non-existent project",
 			api:           "http://127.0.0.1:5000/api/tool/my-auth-search-catalog-tool/invoke",
 			requestHeader: map[string]string{"my-google-auth_token": idToken},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"prompt\":\"%s\", \"types\":[\"TABLE\"], \"projectIds\":[\"%s-%s\"], \"datasetIds\":[\"%s\"]}", tableName, BigqueryProject, uuid.NewString(), datasetName))),
+			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf("{\"prompt\":\"%s\", \"types\":[\"TABLE\"], \"projectIds\":[\"%s\"], \"datasetIds\":[\"%s\"]}", tableName, BigqueryProject+"-nonexistent", datasetName))),
 			isErr:         true,
 		},
 		{
@@ -3165,12 +3192,24 @@ func runBigQuerySearchCatalogToolInvokeTest(t *testing.T, datasetName string, ta
 				}
 				t.Fatalf("expected 'result' field to be a string, got %T", result["result"])
 			}
+
+			var errorCheck map[string]any
+			if err := json.Unmarshal([]byte(resultStr), &errorCheck); err == nil {
+				if _, hasError := errorCheck["error"]; hasError {
+					if tc.isErr {
+						return
+					}
+					t.Fatalf("unexpected error object in result: %s", resultStr)
+				}
+			}
+
 			if tc.isErr && (resultStr == "" || resultStr == "[]") {
 				return
 			}
-			var entries []interface{}
+
+			var entries []any
 			if err := json.Unmarshal([]byte(resultStr), &entries); err != nil {
-				t.Fatalf("error unmarshalling result string: %v", err)
+				t.Fatalf("error unmarshalling result string: %v. Raw string: %s", err, resultStr)
 			}
 
 			if !tc.isErr {
@@ -3218,7 +3257,7 @@ func runForecastWithRestriction(t *testing.T, allowedTableFullName, disallowedTa
 		{
 			name:           "invoke with disallowed table name",
 			historyData:    disallowedTableUnquoted,
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    fmt.Sprintf("access to dataset '%s' (from table '%s') is not allowed", disallowedDatasetFQN, disallowedTableUnquoted),
 		},
 		{
@@ -3230,7 +3269,7 @@ func runForecastWithRestriction(t *testing.T, allowedTableFullName, disallowedTa
 		{
 			name:           "invoke with query on disallowed table",
 			historyData:    fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    fmt.Sprintf("query explicitly accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
 		},
 	}
@@ -3274,14 +3313,21 @@ func runForecastWithRestriction(t *testing.T, allowedTableFullName, disallowedTa
 					t.Fatalf("unable to find result in response body")
 				}
 				if !strings.Contains(got, tc.wantInResult) {
-					t.Errorf("unexpected result: got %q, want to contain %q", got, tc.wantInResult)
+					t.Errorf("unexpected result: got %q, want %q", got, tc.wantInResult)
 				}
 			}
 
 			if tc.wantInError != "" {
-				bodyBytes, _ := io.ReadAll(resp.Body)
-				if !strings.Contains(string(bodyBytes), tc.wantInError) {
-					t.Errorf("unexpected error message: got %q, want to contain %q", string(bodyBytes), tc.wantInError)
+				var respBody map[string]interface{}
+				if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+					t.Fatalf("error parsing response body: %v", err)
+				}
+				got, ok := respBody["result"].(string)
+				if !ok {
+					t.Fatalf("unable to find result in response body")
+				}
+				if !strings.Contains(got, tc.wantInError) {
+					t.Errorf("unexpected error message: got %q, want to contain %q", got, tc.wantInError)
 				}
 			}
 		})
@@ -3309,8 +3355,8 @@ func runAnalyzeContributionWithRestriction(t *testing.T, allowedTableFullName, d
 		{
 			name:           "invoke with disallowed table name",
 			inputData:      disallowedTableUnquoted,
-			wantStatusCode: http.StatusBadRequest,
-			wantInError:    fmt.Sprintf("access to dataset '%s' (from table '%s') is not allowed", disallowedDatasetFQN, disallowedTableUnquoted),
+			wantStatusCode: http.StatusOK,
+			wantInResult:   fmt.Sprintf("access to dataset '%s' (from table '%s') is not allowed", disallowedDatasetFQN, disallowedTableUnquoted),
 		},
 		{
 			name:           "invoke with query on allowed table",
@@ -3321,7 +3367,7 @@ func runAnalyzeContributionWithRestriction(t *testing.T, allowedTableFullName, d
 		{
 			name:           "invoke with query on disallowed table",
 			inputData:      fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
-			wantStatusCode: http.StatusBadRequest,
+			wantStatusCode: http.StatusOK,
 			wantInError:    fmt.Sprintf("query explicitly accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
 		},
 	}
@@ -3363,7 +3409,13 @@ func runAnalyzeContributionWithRestriction(t *testing.T, allowedTableFullName, d
 			}
 
 			if tc.wantInError != "" {
-				if !strings.Contains(string(bodyBytes), tc.wantInError) {
+				var got string
+				if respBody["result"] != nil {
+					got, _ = respBody["result"].(string)
+				} else if respBody["error"] != nil {
+					got, _ = respBody["error"].(string)
+				}
+				if !strings.Contains(got, tc.wantInError) && !strings.Contains(string(bodyBytes), tc.wantInError) {
 					t.Errorf("unexpected error message: got %q, want to contain %q", string(bodyBytes), tc.wantInError)
 				}
 			}
