@@ -217,8 +217,12 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 				}
 			}
 
-			if _, err := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, inputData, nil, connProps, source); err != nil {
+			dryRunJob, err := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, inputData, nil, connProps, source)
+			if err != nil {
 				return nil, util.ProcessGcpError(err)
+			}
+			if dryRunJob.Statistics.Query.StatementType != "SELECT" {
+				return nil, util.NewAgentError(fmt.Sprintf("the 'input_data' parameter only supports a table ID or a SELECT query. The provided query has statement type '%s'", dryRunJob.Statistics.Query.StatementType), nil)
 			}
 		}
 		inputDataSource = fmt.Sprintf("(%s)", inputData)

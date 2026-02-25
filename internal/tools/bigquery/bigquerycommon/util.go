@@ -129,7 +129,7 @@ func ValidateQueryAgainstAllowedDatasets(
 			return nil, fmt.Errorf("failed to analyze query for explicit table references: %w", err)
 		}
 		if explicitlyReferenced {
-			return nil, fmt.Errorf("query explicitly accesses dataset '%s', which is not in the allowed list", strings.Join(strings.Split(violatingTables[0], ".")[:2], "."))
+			return nil, fmt.Errorf("access to dataset '%s' is not allowed", strings.Join(strings.Split(violatingTables[0], ".")[:2], "."))
 		}
 	}
 
@@ -143,7 +143,7 @@ func ValidateQueryAgainstAllowedDatasets(
 		parts := strings.Split(tableID, ".")
 		if len(parts) == 3 {
 			if !validator.IsDatasetAllowed(parts[0], parts[1]) {
-				return nil, fmt.Errorf("query accesses dataset '%s.%s', which is not in the allowed list", parts[0], parts[1])
+				return nil, fmt.Errorf("access to dataset '%s.%s' is not allowed", parts[0], parts[1])
 			}
 		}
 	}
