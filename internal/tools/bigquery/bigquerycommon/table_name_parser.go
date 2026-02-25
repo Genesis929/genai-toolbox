@@ -55,8 +55,8 @@ const (
 var tableFollowsKeywords = map[string]bool{
 	"from":   true,
 	"join":   true,
-	"into":   true, // INSERT INTO, MERGE INTO
 	"update": true,
+	"into":   true, // INSERT INTO, MERGE INTO
 	"table":  true, // CREATE TABLE, ALTER TABLE
 	"using":  true, // MERGE ... USING
 	"insert": true, // INSERT my_table
