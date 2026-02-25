@@ -247,7 +247,6 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 		"X-Goog-API-Client":             util.GDAClientID,
 	}
 
-
 	payload := CAPayload{
 		Project:  fmt.Sprintf("projects/%s", projectID),
 		Messages: []Message{{UserMessage: UserMessage{Text: finalQueryText}}},
