@@ -192,24 +192,9 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 					{Key: "session_id", Value: session.ID},
 				}
 			}
-			dryRunJob, err := bqutil.DryRunQuery(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, historyData, nil, connProps)
-			if err != nil {
-				return nil, fmt.Errorf("query validation failed: %w", err)
-			}
-			statementType := dryRunJob.Statistics.Query.StatementType
-			if statementType != "SELECT" {
-				return nil, fmt.Errorf("the 'history_data' parameter only supports a table ID or a SELECT query. The provided query has statement type '%s'", statementType)
-			}
 
-			queryStats := dryRunJob.Statistics.Query
-			if queryStats != nil {
-				for _, tableRef := range queryStats.ReferencedTables {
-					if !source.IsDatasetAllowed(tableRef.ProjectId, tableRef.DatasetId) {
-						return nil, fmt.Errorf("query in history_data accesses dataset '%s.%s', which is not in the allowed list", tableRef.ProjectId, tableRef.DatasetId)
-					}
-				}
-			} else {
-				return nil, fmt.Errorf("could not analyze query in history_data to validate against allowed datasets")
+			if _, err := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, historyData, nil, connProps, source); err != nil {
+				return nil, err
 			}
 		}
 		historyDataSource = fmt.Sprintf("(%s)", historyData)

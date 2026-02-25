@@ -57,6 +57,100 @@ func DryRunQuery(ctx context.Context, restService *bigqueryrestapi.Service, proj
 	return insertResponse, nil
 }
 
+// DatasetValidator defines the interface for checking if a dataset is allowed.
+type DatasetValidator interface {
+	IsDatasetAllowed(projectID, datasetID string) bool
+}
+
+// ValidateQueryAgainstAllowedDatasets validates a SQL query against a list of allowed datasets.
+// It uses both dry run and a local parser to support authorized views.
+func ValidateQueryAgainstAllowedDatasets(
+	ctx context.Context,
+	restService *bigqueryrestapi.Service,
+	projectID string,
+	location string,
+	sql string,
+	params []*bigqueryrestapi.QueryParameter,
+	connProps []*bigqueryapi.ConnectionProperty,
+	validator DatasetValidator,
+) (*bigqueryrestapi.Job, error) {
+	dryRunJob, err := DryRunQuery(ctx, restService, projectID, location, sql, params, connProps)
+	if err != nil {
+		return nil, fmt.Errorf("query validation failed: %w", err)
+	}
+
+	if dryRunJob.Statistics == nil || dryRunJob.Statistics.Query == nil {
+		return nil, fmt.Errorf("dry run failed to return query statistics")
+	}
+	statementType := dryRunJob.Statistics.Query.StatementType
+	// Common restricted operations
+	switch statementType {
+	case "CREATE_SCHEMA", "DROP_SCHEMA", "ALTER_SCHEMA":
+		return nil, fmt.Errorf("dataset-level operations like '%s' are not allowed when dataset restrictions are in place", statementType)
+	case "CREATE_FUNCTION", "CREATE_TABLE_FUNCTION", "CREATE_PROCEDURE":
+		return nil, fmt.Errorf("creating stored routines ('%s') is not allowed when dataset restrictions are in place, as their contents cannot be safely analyzed", statementType)
+	case "CALL":
+		return nil, fmt.Errorf("calling stored procedures ('%s') is not allowed when dataset restrictions are in place, as their contents cannot be safely analyzed", statementType)
+	}
+
+	// Use a map to avoid duplicate table names from the dry run result.
+	tableIDSet := make(map[string]struct{})
+	queryStats := dryRunJob.Statistics.Query
+	if queryStats != nil {
+		for _, tableRef := range queryStats.ReferencedTables {
+			tableIDSet[fmt.Sprintf("%s.%s.%s", tableRef.ProjectId, tableRef.DatasetId, tableRef.TableId)] = struct{}{}
+		}
+		if tableRef := queryStats.DdlTargetTable; tableRef != nil {
+			tableIDSet[fmt.Sprintf("%s.%s.%s", tableRef.ProjectId, tableRef.DatasetId, tableRef.TableId)] = struct{}{}
+		}
+		if tableRef := queryStats.DdlDestinationTable; tableRef != nil {
+			tableIDSet[fmt.Sprintf("%s.%s.%s", tableRef.ProjectId, tableRef.DatasetId, tableRef.TableId)] = struct{}{}
+		}
+	}
+
+	var violatingTables []string
+	for tableID := range tableIDSet {
+		parts := strings.Split(tableID, ".")
+		if len(parts) == 3 {
+			if !validator.IsDatasetAllowed(parts[0], parts[1]) {
+				violatingTables = append(violatingTables, tableID)
+			}
+		}
+	}
+
+	if len(tableIDSet) > 0 && len(violatingTables) == 0 {
+		return dryRunJob, nil
+	}
+
+	// If violations were found, check if they are explicitly in the SQL to support authorized views.
+	if len(violatingTables) > 0 {
+		explicitlyReferenced, err := IsAnyTableExplicitlyReferenced(sql, projectID, violatingTables)
+		if err != nil {
+			return nil, fmt.Errorf("failed to analyze query for explicit table references: %w", err)
+		}
+		if explicitlyReferenced {
+			return nil, fmt.Errorf("query explicitly accesses dataset '%s', which is not in the allowed list", strings.Join(strings.Split(violatingTables[0], ".")[:2], "."))
+		}
+	}
+
+	// Fall back to TableParser for final intent verification or if dry run was inconclusive.
+	parsedTables, parseErr := TableParser(sql, projectID)
+	if parseErr != nil {
+		return nil, fmt.Errorf("could not safely analyze query with dataset restrictions: %w", parseErr)
+	}
+
+	for _, tableID := range parsedTables {
+		parts := strings.Split(tableID, ".")
+		if len(parts) == 3 {
+			if !validator.IsDatasetAllowed(parts[0], parts[1]) {
+				return nil, fmt.Errorf("query accesses dataset '%s.%s', which is not in the allowed list", parts[0], parts[1])
+			}
+		}
+	}
+
+	return dryRunJob, nil
+}
+
 // BQTypeStringFromToolType converts a tool parameter type string to a BigQuery standard SQL type string.
 func BQTypeStringFromToolType(toolType string) (string, error) {
 	switch toolType {

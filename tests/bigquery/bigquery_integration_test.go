@@ -368,6 +368,141 @@ func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
 	runAnalyzeContributionWithRestriction(t, allowedAnalyzeContributionTableFullName2, disallowedAnalyzeContributionTableFullName)
 }
 
+func TestBigQueryAuthorizedViewWithRestriction(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	client, err := initBigQueryConnection(BigqueryProject)
+	if err != nil {
+		t.Fatalf("unable to create BigQuery client: %s", err)
+	}
+
+	baseName := strings.ReplaceAll(uuid.New().String(), "-", "")
+	allowedDatasetName := fmt.Sprintf("allowed_ds_%s", baseName)
+	disallowedDatasetName := fmt.Sprintf("disallowed_ds_%s", baseName)
+	tableName := "source_table"
+	viewName := "auth_view"
+
+	// Create datasets
+	if err := client.Dataset(allowedDatasetName).Create(ctx, &bigqueryapi.DatasetMetadata{Location: "US"}); err != nil {
+		t.Fatalf("failed to create allowed dataset: %v", err)
+	}
+	defer client.Dataset(allowedDatasetName).DeleteWithContents(ctx)
+
+	if err := client.Dataset(disallowedDatasetName).Create(ctx, &bigqueryapi.DatasetMetadata{Location: "US"}); err != nil {
+		t.Fatalf("failed to create disallowed dataset: %v", err)
+	}
+	defer client.Dataset(disallowedDatasetName).DeleteWithContents(ctx)
+
+	// Create source table in disallowed dataset
+	tableFullName := fmt.Sprintf("`%s.%s.%s`", BigqueryProject, disallowedDatasetName, tableName)
+	if _, err := client.Query(fmt.Sprintf("CREATE TABLE %s (id INT64)", tableFullName)).Run(ctx); err != nil {
+		// Wait and retry if it's a "still being created" error? No, usually it's fine.
+		t.Fatalf("failed to create source table: %v", err)
+	}
+
+	// Create view in allowed dataset referencing the disallowed table
+	viewFullName := fmt.Sprintf("`%s.%s.%s`", BigqueryProject, allowedDatasetName, viewName)
+	metadata := &bigqueryapi.TableMetadata{
+		ViewQuery: fmt.Sprintf("SELECT * FROM %s", tableFullName),
+	}
+	if err := client.Dataset(allowedDatasetName).Table(viewName).Create(ctx, metadata); err != nil {
+		t.Fatalf("failed to create view: %v", err)
+	}
+
+	// Authorize the view to access the disallowed dataset
+	dsMetadata, err := client.Dataset(disallowedDatasetName).Metadata(ctx)
+	if err != nil {
+		t.Fatalf("failed to get disallowed dataset metadata: %v", err)
+	}
+
+	newAccess := append(dsMetadata.Access, &bigqueryapi.AccessEntry{
+		EntityType: bigqueryapi.ViewEntity,
+		View:       client.Dataset(allowedDatasetName).Table(viewName),
+	})
+
+	update := bigqueryapi.DatasetMetadataToUpdate{
+		Access: newAccess,
+	}
+	if _, err := client.Dataset(disallowedDatasetName).Update(ctx, update, dsMetadata.ETag); err != nil {
+		t.Fatalf("failed to authorize view: %v", err)
+	}
+
+	// Configure toolbox with ONLY the allowed dataset
+	sourceConfig := getBigQueryVars(t)
+	sourceConfig["allowedDatasets"] = []string{allowedDatasetName}
+	config := map[string]any{
+		"sources": map[string]any{"my-instance": sourceConfig},
+		"tools": map[string]any{
+			"execute-sql-restricted": map[string]any{
+				"kind":        "bigquery-execute-sql",
+				"source":      "my-instance",
+				"description": "Tool to execute SQL with restriction",
+			},
+		},
+	}
+
+	cmd, cleanup, err := tests.StartCmd(ctx, config)
+	if err != nil {
+		t.Fatalf("command initialization returned an error: %s", err)
+	}
+	defer cleanup()
+
+	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := testutils.WaitForString(waitCtx, regexp.MustCompile(`Server ready to serve`), cmd.Out)
+	if err != nil {
+		t.Logf("toolbox command logs: \n%s", out)
+		t.Fatalf("toolbox didn't start successfully: %s", err)
+	}
+
+	// Invoke the tool querying the view. This should now SUCCEED.
+	t.Run("query authorized view", func(t *testing.T) {
+		sql := fmt.Sprintf("SELECT * FROM %s", viewFullName)
+		body := bytes.NewBuffer([]byte(fmt.Sprintf(`{"sql":"%s"}`, sql)))
+		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:5000/api/tool/execute-sql-restricted/invoke", body)
+		if err != nil {
+			t.Fatalf("unable to create request: %s", err)
+		}
+		req.Header.Add("Content-type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("unable to send request: %s", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, http.StatusOK, string(bodyBytes))
+		}
+	})
+
+	// Also verify that direct query to the disallowed table still FAILS.
+	t.Run("query disallowed table directly", func(t *testing.T) {
+		sql := fmt.Sprintf("SELECT * FROM %s", tableFullName)
+		body := bytes.NewBuffer([]byte(fmt.Sprintf(`{"sql":"%s"}`, sql)))
+		req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:5000/api/tool/execute-sql-restricted/invoke", body)
+		if err != nil {
+			t.Fatalf("unable to create request: %s", err)
+		}
+		req.Header.Add("Content-type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("unable to send request: %s", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status code: got %d, want %d. Body: %s", resp.StatusCode, http.StatusBadRequest, string(bodyBytes))
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		if !strings.Contains(string(bodyBytes), fmt.Sprintf("query explicitly accesses dataset '%s.%s', which is not in the allowed list", BigqueryProject, disallowedDatasetName)) {
+			t.Errorf("unexpected error message: %s", string(bodyBytes))
+		}
+	})
+}
+
 func TestBigQueryWriteModeAllowed(t *testing.T) {
 	sourceConfig := getBigQueryVars(t)
 	sourceConfig["writeMode"] = "allowed"
@@ -2760,7 +2895,7 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 			name:           "invoke on disallowed table",
 			sql:            fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
 			wantStatusCode: http.StatusBadRequest,
-			wantInError: fmt.Sprintf("query accesses dataset '%s', which is not in the allowed list",
+			wantInError: fmt.Sprintf("query explicitly accesses dataset '%s', which is not in the allowed list",
 				strings.Join(
 					strings.Split(strings.Trim(disallowedTableFullName, "`"), ".")[0:2],
 					".")),
@@ -2787,13 +2922,13 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 			name:           "disallowed create procedure",
 			sql:            fmt.Sprintf("CREATE PROCEDURE %s.my_proc() BEGIN SELECT 1; END", allowedDatasetID),
 			wantStatusCode: http.StatusBadRequest,
-			wantInError:    "unanalyzable statements like 'CREATE PROCEDURE' are not allowed",
+			wantInError:    "not allowed",
 		},
 		{
 			name:           "disallowed execute immediate",
 			sql:            "EXECUTE IMMEDIATE 'SELECT 1'",
 			wantStatusCode: http.StatusBadRequest,
-			wantInError:    "EXECUTE IMMEDIATE is not allowed when dataset restrictions are in place",
+			wantInError:    "not allowed",
 		},
 	}
 
@@ -3096,7 +3231,7 @@ func runForecastWithRestriction(t *testing.T, allowedTableFullName, disallowedTa
 			name:           "invoke with query on disallowed table",
 			historyData:    fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
 			wantStatusCode: http.StatusBadRequest,
-			wantInError:    fmt.Sprintf("query in history_data accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
+			wantInError:    fmt.Sprintf("query explicitly accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
 		},
 	}
 
@@ -3187,7 +3322,7 @@ func runAnalyzeContributionWithRestriction(t *testing.T, allowedTableFullName, d
 			name:           "invoke with query on disallowed table",
 			inputData:      fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
 			wantStatusCode: http.StatusBadRequest,
-			wantInError:    fmt.Sprintf("query in input_data accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
+			wantInError:    fmt.Sprintf("query explicitly accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
 		},
 	}
 

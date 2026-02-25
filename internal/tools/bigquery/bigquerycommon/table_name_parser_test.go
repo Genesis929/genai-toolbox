@@ -471,6 +471,77 @@ func TestTableParser(t *testing.T) {
 			wantErr:          true,
 			wantErrMsg:       "unanalyzable statements like 'CREATE FUNCTION' are not allowed",
 		},
+		{
+			name:             "alias filtering simple",
+			sql:              "SELECT t1.col FROM proj.data.table AS t1",
+			defaultProjectID: "default-proj",
+			want:             []string{"proj.data.table"},
+			wantErr:          false,
+		},
+		{
+			name:             "alias filtering complex",
+			sql:              "SELECT t1.col1, t2.col2 FROM proj.data.tbl1 t1 JOIN proj.data.tbl2 AS t2 ON t1.id = t2.id",
+			defaultProjectID: "default-proj",
+			want:             []string{"proj.data.tbl1", "proj.data.tbl2"},
+			wantErr:          false,
+		},
+		{
+			name:             "alias filtering in where clause",
+			sql:              "SELECT * FROM proj.data.tbl1 AS t1 WHERE t1.id > 10",
+			defaultProjectID: "default-proj",
+			want:             []string{"proj.data.tbl1"},
+			wantErr:          false,
+		},
+		{
+			name:             "unnest column reference",
+			sql:              "SELECT x FROM `proj.ds.tbl` AS t, UNNEST(t.arr) AS x",
+			defaultProjectID: "default-proj",
+			want:             []string{"proj.ds.tbl"},
+			wantErr:          false,
+		},
+		{
+			name:             "CTE with dots",
+			sql:              "WITH `my.cte` AS (SELECT 1) SELECT * FROM `my.cte`",
+			defaultProjectID: "default-proj",
+			want:             []string{},
+			wantErr:          false,
+		},
+		{
+			name: "nested CTEs with dot-containing aliases",
+			sql: `
+				WITH raw_metrics AS (
+					SELECT id, score FROM production-data.analytics.events
+				),
+				derived.results AS (
+					SELECT id, score * 2 as double_score FROM raw_metrics
+				)
+				SELECT * FROM derived.results WHERE double_score > 100
+			`,
+			defaultProjectID: "default-proj",
+			want:             []string{"production-data.analytics.events"},
+			wantErr:          false,
+		},
+		{
+			name:             "implicit join with comma",
+			sql:              "SELECT * FROM proj.data.tbl1, proj.data.tbl2",
+			defaultProjectID: "default-proj",
+			want:             []string{"proj.data.tbl1", "proj.data.tbl2"},
+			wantErr:          false,
+		},
+		{
+			name:             "implicit alias",
+			sql:              "SELECT t.col FROM proj.data.tbl t",
+			defaultProjectID: "default-proj",
+			want:             []string{"proj.data.tbl"},
+			wantErr:          false,
+		},
+		{
+			name:             "unnest column reference complex",
+			sql:              "SELECT x FROM `proj.ds.tbl` AS t, UNNEST(t.arr) AS x JOIN `other.ds.tbl2` as o ON t.id = o.id",
+			defaultProjectID: "default-proj",
+			want:             []string{"proj.ds.tbl", "other.ds.tbl2"},
+			wantErr:          false,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -490,6 +561,134 @@ func TestTableParser(t *testing.T) {
 			sort.Strings(tc.want)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("TableParser() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestIsAnyTableExplicitlyReferenced(t *testing.T) {
+	testCases := []struct {
+		name             string
+		sql              string
+		defaultProjectID string
+		targetTableIDs   []string
+		want             bool
+	}{
+		{
+			name:             "simple match",
+			sql:              "SELECT * FROM `proj.ds.tbl`",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "match without project id in sql",
+			sql:              "SELECT * FROM `ds.tbl`",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"def-proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "no match",
+			sql:              "SELECT * FROM `ds.view`",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"def-proj.ds.tbl"},
+			want:             false,
+		},
+		{
+			name:             "ignore in strings",
+			sql:              "SELECT 'proj.ds.tbl' FROM `ds.view` ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             false,
+		},
+		{
+			name:             "ignore in comments",
+			sql:              "SELECT * FROM `ds.view` -- referencing proj.ds.tbl here",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             false,
+		},
+		{
+			name:             "match in join",
+			sql:              "SELECT * FROM `ds.view` JOIN `proj.ds.tbl` ON 1=1",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "match as column reference",
+			sql:              "SELECT proj.ds.tbl.col FROM `ds.view`",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "match with different casing",
+			sql:              "SELECT * FROM `PROJ.ds.TBL`",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "raw string ignore",
+			sql:              "SELECT r'proj.ds.tbl' FROM `ds.view` ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             false,
+		},
+		{
+			name:             "mixed quoting style",
+			sql:              "SELECT * FROM `proj`.ds.`tbl` ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "all parts quoted separately",
+			sql:              "SELECT * FROM `proj`.`ds`.`tbl` ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "middle part quoted",
+			sql:              "SELECT * FROM proj.`ds`.tbl ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "fully qualified column reference",
+			sql:              "SELECT proj.ds.tbl.col FROM `something` ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"proj.ds.tbl"},
+			want:             true,
+		},
+		{
+			name:             "domain scoped project ID match",
+			sql:              "SELECT * FROM `google.com:project.dataset.table` ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"google.com:project.dataset.table"},
+			want:             true,
+		},
+		{
+			name:             "domain scoped project ID match with column",
+			sql:              "SELECT `google.com:project.dataset.table`.col FROM `something_else` ",
+			defaultProjectID: "def-proj",
+			targetTableIDs:   []string{"google.com:project.dataset.table"},
+			want:             true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := bigquerycommon.IsAnyTableExplicitlyReferenced(tc.sql, tc.defaultProjectID, tc.targetTableIDs)
+			if err != nil {
+				t.Fatalf("IsAnyTableExplicitlyReferenced() error = %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("IsAnyTableExplicitlyReferenced() = %v, want %v", got, tc.want)
 			}
 		})
 	}

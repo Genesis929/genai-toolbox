@@ -185,11 +185,22 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 		}
 	}
 
-	dryRunJob, err := bqutil.DryRunQuery(ctx, restService, bqClient.Project(), bqClient.Location, sql, nil, connProps)
-	if err != nil {
-		return nil, fmt.Errorf("query validation failed: %w", err)
+	var dryRunJob *bigqueryrestapi.Job
+	if len(source.BigQueryAllowedDatasets()) > 0 {
+		dryRunJob, err = bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, bqClient.Project(), bqClient.Location, sql, nil, connProps, source)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		dryRunJob, err = bqutil.DryRunQuery(ctx, restService, bqClient.Project(), bqClient.Location, sql, nil, connProps)
+		if err != nil {
+			return nil, fmt.Errorf("query validation failed: %w", err)
+		}
 	}
 
+	if dryRunJob.Statistics == nil || dryRunJob.Statistics.Query == nil {
+		return nil, fmt.Errorf("dry run failed to return query statistics")
+	}
 	statementType := dryRunJob.Statistics.Query.StatementType
 
 	switch source.BigQueryWriteMode() {
@@ -202,60 +213,6 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 			if dest := dryRunJob.Configuration.Query.DestinationTable; dest != nil && dest.DatasetId != session.DatasetID {
 				return nil, fmt.Errorf("protected write mode only supports SELECT statements, or write operations in the anonymous "+
 					"dataset of a BigQuery session, but destination was %q", dest.DatasetId)
-			}
-		}
-	}
-
-	if len(source.BigQueryAllowedDatasets()) > 0 {
-		switch statementType {
-		case "CREATE_SCHEMA", "DROP_SCHEMA", "ALTER_SCHEMA":
-			return nil, fmt.Errorf("dataset-level operations like '%s' are not allowed when dataset restrictions are in place", statementType)
-		case "CREATE_FUNCTION", "CREATE_TABLE_FUNCTION", "CREATE_PROCEDURE":
-			return nil, fmt.Errorf("creating stored routines ('%s') is not allowed when dataset restrictions are in place, as their contents cannot be safely analyzed", statementType)
-		case "CALL":
-			return nil, fmt.Errorf("calling stored procedures ('%s') is not allowed when dataset restrictions are in place, as their contents cannot be safely analyzed", statementType)
-		}
-
-		// Use a map to avoid duplicate table names.
-		tableIDSet := make(map[string]struct{})
-
-		// Get all tables from the dry run result. This is the most reliable method.
-		queryStats := dryRunJob.Statistics.Query
-		if queryStats != nil {
-			for _, tableRef := range queryStats.ReferencedTables {
-				tableIDSet[fmt.Sprintf("%s.%s.%s", tableRef.ProjectId, tableRef.DatasetId, tableRef.TableId)] = struct{}{}
-			}
-			if tableRef := queryStats.DdlTargetTable; tableRef != nil {
-				tableIDSet[fmt.Sprintf("%s.%s.%s", tableRef.ProjectId, tableRef.DatasetId, tableRef.TableId)] = struct{}{}
-			}
-			if tableRef := queryStats.DdlDestinationTable; tableRef != nil {
-				tableIDSet[fmt.Sprintf("%s.%s.%s", tableRef.ProjectId, tableRef.DatasetId, tableRef.TableId)] = struct{}{}
-			}
-		}
-
-		var tableNames []string
-		if len(tableIDSet) > 0 {
-			for tableID := range tableIDSet {
-				tableNames = append(tableNames, tableID)
-			}
-		} else if statementType != "SELECT" {
-			// If dry run yields no tables, fall back to the parser for non-SELECT statements
-			// to catch unsafe operations like EXECUTE IMMEDIATE.
-			parsedTables, parseErr := bqutil.TableParser(sql, source.BigQueryClient().Project())
-			if parseErr != nil {
-				// If parsing fails (e.g., EXECUTE IMMEDIATE), we cannot guarantee safety, so we must fail.
-				return nil, fmt.Errorf("could not parse tables from query to validate against allowed datasets: %w", parseErr)
-			}
-			tableNames = parsedTables
-		}
-
-		for _, tableID := range tableNames {
-			parts := strings.Split(tableID, ".")
-			if len(parts) == 3 {
-				projectID, datasetID := parts[0], parts[1]
-				if !source.IsDatasetAllowed(projectID, datasetID) {
-					return nil, fmt.Errorf("query accesses dataset '%s.%s', which is not in the allowed list", projectID, datasetID)
-				}
 			}
 		}
 	}

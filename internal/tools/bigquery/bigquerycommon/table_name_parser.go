@@ -80,20 +80,32 @@ var tableContextExitKeywords = map[string]bool{
 func TableParser(sql, defaultProjectID string) ([]string, error) {
 	tableIDSet := make(map[string]struct{})
 	visitedSQLs := make(map[string]struct{})
-	if _, err := parseSQL(sql, defaultProjectID, tableIDSet, visitedSQLs, false); err != nil {
+	aliases := make(map[string]struct{})
+	if _, err := parseSQL(sql, defaultProjectID, tableIDSet, visitedSQLs, aliases, false); err != nil {
 		return nil, err
 	}
 
 	tableIDs := make([]string, 0, len(tableIDSet))
 	for id := range tableIDSet {
-		tableIDs = append(tableIDs, id)
+		isAlias := false
+		parts := strings.Split(id, ".")
+		for j := 0; j < len(parts); j++ {
+			suffix := strings.ToLower(strings.Join(parts[j:], "."))
+			if _, ok := aliases[suffix]; ok {
+				isAlias = true
+				break
+			}
+		}
+		if !isAlias {
+			tableIDs = append(tableIDs, id)
+		}
 	}
 	return tableIDs, nil
 }
 
 // parseSQL is the core recursive function that processes SQL strings.
 // It uses a state machine to find table names and recursively parse EXECUTE IMMEDIATE.
-func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visitedSQLs map[string]struct{}, inSubquery bool) (int, error) {
+func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visitedSQLs map[string]struct{}, aliases map[string]struct{}, inSubquery bool) (int, error) {
 	// Prevent infinite recursion.
 	if _, ok := visitedSQLs[sql]; ok {
 		return len(sql), nil
@@ -101,13 +113,13 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 	visitedSQLs[sql] = struct{}{}
 
 	state := stateNormal
-	expectingTable := false
+	expectingTable, expectingAlias, expectingCTE := false, false, false
 	var lastTableKeyword, lastToken, statementVerb string
 	runes := []rune(sql)
 
 	for i := 0; i < len(runes); {
+		remaining := string(runes[i:])
 		char := runes[i]
-		remaining := sql[i:]
 
 		switch state {
 		case stateNormal:
@@ -126,20 +138,29 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 				i += 2
 				continue
 			}
+			if char == ',' {
+				if lastTableKeyword == "from" {
+					expectingTable = true
+					expectingAlias = false
+				} else if statementVerb == "with" {
+					expectingCTE = true
+					expectingAlias = false
+				}
+				i++
+				continue
+			}
 			if char == '(' {
-				if expectingTable {
-					// The subquery starts after '('.
-					consumed, err := parseSQL(remaining[1:], defaultProjectID, tableIDSet, visitedSQLs, true)
+				if expectingTable || expectingCTE || lastToken == "as" {
+					consumed, err := parseSQL(string(runes[i+1:]), defaultProjectID, tableIDSet, visitedSQLs, aliases, true)
 					if err != nil {
 						return 0, err
 					}
-					// Advance i by the length of the subquery + the opening parenthesis.
-					// The recursive call returns what it consumed, including the closing parenthesis.
 					i += consumed + 1
-					// For most keywords, we expect only one table. `from` can have multiple "tables" (subqueries).
 					if lastTableKeyword != "from" {
 						expectingTable = false
 					}
+					expectingAlias = true
+					expectingCTE = false
 					continue
 				}
 			}
@@ -148,32 +169,32 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 					return i + 1, nil
 				}
 			}
-
 			if char == ';' {
 				statementVerb = ""
 				lastToken = ""
+				expectingTable = false
+				expectingAlias = false
+				expectingCTE = false
 				i++
 				continue
-
 			}
-
-			// Raw strings must be checked before regular strings.
-			if strings.HasPrefix(remaining, "r'''") || strings.HasPrefix(remaining, "R'''") {
+			remLow := strings.ToLower(remaining)
+			if strings.HasPrefix(remLow, "r'''") {
 				state = stateInRawTripleSingleQuoteString
 				i += 4
 				continue
 			}
-			if strings.HasPrefix(remaining, `r"""`) || strings.HasPrefix(remaining, `R"""`) {
+			if strings.HasPrefix(remLow, `r"""`) {
 				state = stateInRawTripleDoubleQuoteString
 				i += 4
 				continue
 			}
-			if strings.HasPrefix(remaining, "r'") || strings.HasPrefix(remaining, "R'") {
+			if strings.HasPrefix(remLow, "r'") {
 				state = stateInRawSingleQuoteString
 				i += 2
 				continue
 			}
-			if strings.HasPrefix(remaining, `r"`) || strings.HasPrefix(remaining, `R"`) {
+			if strings.HasPrefix(remLow, `r"`) {
 				state = stateInRawDoubleQuoteString
 				i += 2
 				continue
@@ -199,7 +220,7 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 				continue
 			}
 
-			if unicode.IsLetter(char) || char == '`' {
+			if unicode.IsLetter(char) || char == '`' || char == '_' {
 				parts, consumed, err := parseIdentifierSequence(remaining)
 				if err != nil {
 					return 0, err
@@ -208,9 +229,11 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 					i++
 					continue
 				}
+				keyword := strings.ToLower(parts[0])
+				fullID := strings.ToLower(strings.Join(parts, "."))
 
+				// Handle security-restricted operations and verb identification.
 				if len(parts) == 1 {
-					keyword := strings.ToLower(parts[0])
 					switch keyword {
 					case "call":
 						return 0, fmt.Errorf("CALL is not allowed when dataset restrictions are in place, as the called procedure's contents cannot be safely analyzed")
@@ -233,13 +256,76 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 							return 0, fmt.Errorf("dataset-level operations like '%s %s' are not allowed when dataset restrictions are in place", strings.ToUpper(statementVerb), strings.ToUpper(keyword))
 						}
 					}
+				}
 
-					if _, ok := tableFollowsKeywords[keyword]; ok {
+				// Resolve aliases and identify table references.
+				isKnownAlias := false
+				if _, ok := aliases[fullID]; ok {
+					isKnownAlias = true
+				}
+				if !isKnownAlias && len(parts) > 1 {
+					if _, ok := aliases[strings.ToLower(parts[0])]; ok {
+						isKnownAlias = true
+					}
+				}
+
+				if expectingCTE {
+					aliases[fullID] = struct{}{}
+					aliases[strings.ToLower(parts[0])] = struct{}{}
+					expectingCTE = false
+				} else if expectingAlias {
+					if len(parts) == 1 && (tableContextExitKeywords[keyword] || tableFollowsKeywords[keyword] || keyword == "select" || keyword == "with") {
+						expectingAlias = false
+					} else {
+						aliases[fullID] = struct{}{}
+						aliases[strings.ToLower(parts[0])] = struct{}{}
+						expectingAlias = false
+						isKnownAlias = true
+					}
+				}
+
+				// Re-check aliases after potential registration.
+				if !isKnownAlias {
+					if _, ok := aliases[fullID]; ok {
+						isKnownAlias = true
+					}
+				}
+
+				if expectingTable && !isKnownAlias {
+					if len(parts) >= 2 {
+						tableID, err := formatTableID(parts, defaultProjectID)
+						if err != nil {
+							return 0, err
+						}
+						if tableID != "" {
+							tableIDSet[tableID] = struct{}{}
+						}
+					}
+					// For most keywords, we expect only one table.
+					if lastTableKeyword != "from" {
+						expectingTable = false
+					}
+					expectingAlias = true
+				}
+
+				// Update state machine based on the current keyword.
+				if len(parts) == 1 {
+					if keyword == "with" {
+						expectingCTE = true
+						statementVerb = "with"
+					} else if keyword == "as" {
+						if statementVerb != "with" {
+							expectingAlias = true
+						}
+						expectingTable = false
+					} else if _, ok := tableFollowsKeywords[keyword]; ok {
 						expectingTable = true
 						lastTableKeyword = keyword
+						expectingAlias = false
 					} else if _, ok := tableContextExitKeywords[keyword]; ok {
 						expectingTable = false
 						lastTableKeyword = ""
+						expectingAlias = false
 					}
 					if lastToken == "create" && keyword == "or" {
 						lastToken = "create or"
@@ -248,29 +334,13 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 					} else {
 						lastToken = keyword
 					}
-				} else if len(parts) >= 2 {
-					// This is a multi-part identifier. If we were expecting a table, this is it.
-					if expectingTable {
-						tableID, err := formatTableID(parts, defaultProjectID)
-						if err != nil {
-							return 0, err
-						}
-						if tableID != "" {
-							tableIDSet[tableID] = struct{}{}
-						}
-						// For most keywords, we expect only one table.
-						if lastTableKeyword != "from" {
-							expectingTable = false
-						}
-					}
+				} else {
 					lastToken = ""
 				}
-
 				i += consumed
 				continue
 			}
 			i++
-
 		case stateInSingleQuoteString:
 			if char == '\\' {
 				i += 2 // Skip backslash and the escaped character.
@@ -290,14 +360,14 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 			}
 			i++
 		case stateInTripleSingleQuoteString:
-			if strings.HasPrefix(remaining, "'''") {
+			if strings.HasPrefix(string(runes[i:]), "'''") {
 				state = stateNormal
 				i += 3
 			} else {
 				i++
 			}
 		case stateInTripleDoubleQuoteString:
-			if strings.HasPrefix(remaining, `"""`) {
+			if strings.HasPrefix(string(runes[i:]), `"""`) {
 				state = stateNormal
 				i += 3
 			} else {
@@ -309,7 +379,7 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 			}
 			i++
 		case stateInMultiLineComment:
-			if strings.HasPrefix(remaining, "*/") {
+			if strings.HasPrefix(string(runes[i:]), "*/") {
 				state = stateNormal
 				i += 2
 			} else {
@@ -326,14 +396,14 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 			}
 			i++
 		case stateInRawTripleSingleQuoteString:
-			if strings.HasPrefix(remaining, "'''") {
+			if strings.HasPrefix(string(runes[i:]), "'''") {
 				state = stateNormal
 				i += 3
 			} else {
 				i++
 			}
 		case stateInRawTripleDoubleQuoteString:
-			if strings.HasPrefix(remaining, `"""`) {
+			if strings.HasPrefix(string(runes[i:]), `"""`) {
 				state = stateNormal
 				i += 3
 			} else {
@@ -341,11 +411,10 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 			}
 		}
 	}
-
 	if inSubquery {
 		return 0, fmt.Errorf("unclosed subquery parenthesis")
 	}
-	return len(sql), nil
+	return len(runes), nil
 }
 
 // parseIdentifierSequence parses a sequence of dot-separated identifiers.
@@ -353,56 +422,40 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 func parseIdentifierSequence(s string) ([]string, int, error) {
 	var parts []string
 	var totalConsumed int
-
+	runes := []rune(s)
 	for {
-		remaining := s[totalConsumed:]
-		trimmed := strings.TrimLeftFunc(remaining, unicode.IsSpace)
-		totalConsumed += len(remaining) - len(trimmed)
-		current := s[totalConsumed:]
-
-		if len(current) == 0 {
+		for totalConsumed < len(runes) && unicode.IsSpace(runes[totalConsumed]) {
+			totalConsumed++
+		}
+		if totalConsumed >= len(runes) {
 			break
 		}
 
 		var part string
 		var consumed int
 
-		if current[0] == '`' {
-			end := strings.Index(current[1:], "`")
+		if runes[totalConsumed] == '`' {
+			end := strings.Index(string(runes[totalConsumed+1:]), "`")
 			if end == -1 {
 				return nil, 0, fmt.Errorf("unclosed backtick identifier")
 			}
-			part = current[1 : end+1]
+			part = string(runes[totalConsumed+1 : totalConsumed+end+1])
 			consumed = end + 2
-		} else if len(current) > 0 && unicode.IsLetter(rune(current[0])) {
-			end := strings.IndexFunc(current, func(r rune) bool {
-				return !unicode.IsLetter(r) && !unicode.IsNumber(r) && r != '_' && r != '-'
-			})
-			if end == -1 {
-				part = current
-				consumed = len(current)
-			} else {
-				part = current[:end]
-				consumed = end
+		} else if unicode.IsLetter(runes[totalConsumed]) || runes[totalConsumed] == '_' {
+			end := totalConsumed
+			for end < len(runes) && (unicode.IsLetter(runes[end]) || unicode.IsNumber(runes[end]) || runes[end] == '_' || runes[end] == '-') {
+				end++
 			}
+			part = string(runes[totalConsumed:end])
+			consumed = end - totalConsumed
 		} else {
 			break
-		}
-
-		if current[0] == '`' && strings.Contains(part, ".") {
-			// This handles cases like `project.dataset.table` but not `project.dataset`.table.
-			// If the character after the quoted identifier is not a dot, we treat it as a full name.
-			if len(current) <= consumed || current[consumed] != '.' {
-				parts = append(parts, strings.Split(part, ".")...)
-				totalConsumed += consumed
-				break
-			}
 		}
 
 		parts = append(parts, strings.Split(part, ".")...)
 		totalConsumed += consumed
 
-		if len(s) <= totalConsumed || s[totalConsumed] != '.' {
+		if totalConsumed >= len(runes) || runes[totalConsumed] != '.' {
 			break
 		}
 		totalConsumed++
@@ -410,22 +463,193 @@ func parseIdentifierSequence(s string) ([]string, int, error) {
 	return parts, totalConsumed, nil
 }
 
+// IsAnyTableExplicitlyReferenced checks if any target tables are explicitly mentioned as
+// identifiers in the SQL, correctly skipping comments and strings.
+func IsAnyTableExplicitlyReferenced(sql, defaultProjectID string, targetTableIDs []string) (bool, error) {
+	if len(targetTableIDs) == 0 {
+		return false, nil
+	}
+
+	targets := make(map[string]struct{})
+	for _, id := range targetTableIDs {
+		targets[strings.ToLower(id)] = struct{}{}
+	}
+
+	state := stateNormal
+	runes := []rune(sql)
+
+	for i := 0; i < len(runes); {
+		remaining := string(runes[i:])
+		char := runes[i]
+
+		switch state {
+		case stateNormal:
+			if strings.HasPrefix(remaining, "--") {
+				state = stateInSingleLineCommentDash
+				i += 2
+				continue
+			}
+			if strings.HasPrefix(remaining, "#") {
+				state = stateInSingleLineCommentHash
+				i++
+				continue
+			}
+			if strings.HasPrefix(remaining, "/*") {
+				state = stateInMultiLineComment
+				i += 2
+				continue
+			}
+
+			if unicode.IsLetter(char) || char == '`' || char == '_' {
+				parts, consumed, err := parseIdentifierSequence(remaining)
+				if err != nil {
+					return false, err
+				}
+				if consumed > 0 {
+					if len(parts) < 2 {
+						i += consumed
+						continue
+					}
+					fullID := strings.ToLower(strings.Join(parts, "."))
+					for target := range targets {
+						// Match exact table name or as a prefix for column references.
+						if fullID == target || strings.HasPrefix(fullID, target+".") {
+							return true, nil
+						}
+						// Also try matching with the default project ID prefix.
+						if defaultProjectID != "" {
+							withDefault := strings.ToLower(defaultProjectID + "." + fullID)
+							if withDefault == target || strings.HasPrefix(withDefault, target+".") {
+								return true, nil
+							}
+						}
+					}
+					i += consumed
+					continue
+				}
+			}
+
+			// Handle various BigQuery string literal formats.
+			remLow := strings.ToLower(remaining)
+			if strings.HasPrefix(remLow, "r'''") {
+				state = stateInRawTripleSingleQuoteString
+				i += 4
+				continue
+			}
+			if strings.HasPrefix(remLow, `r"""`) {
+				state = stateInRawTripleDoubleQuoteString
+				i += 4
+				continue
+			}
+			if strings.HasPrefix(remLow, "r'") {
+				state = stateInRawSingleQuoteString
+				i += 2
+				continue
+			}
+			if strings.HasPrefix(remLow, `r"`) {
+				state = stateInRawDoubleQuoteString
+				i += 2
+				continue
+			}
+			if strings.HasPrefix(remaining, "'''") {
+				state = stateInTripleSingleQuoteString
+				i += 3
+				continue
+			}
+			if strings.HasPrefix(remaining, `"""`) {
+				state = stateInTripleDoubleQuoteString
+				i += 3
+				continue
+			}
+			if char == '\'' {
+				state = stateInSingleQuoteString
+				i++
+				continue
+			}
+			if char == '"' {
+				state = stateInDoubleQuoteString
+				i++
+				continue
+			}
+
+		case stateInSingleQuoteString:
+			if char == '\\' {
+				i += 2
+				continue
+			}
+			if char == '\'' {
+				state = stateNormal
+			}
+		case stateInDoubleQuoteString:
+			if char == '\\' {
+				i += 2
+				continue
+			}
+			if char == '"' {
+				state = stateNormal
+			}
+		case stateInTripleSingleQuoteString:
+			if strings.HasPrefix(remaining, "'''") {
+				state = stateNormal
+				i += 3
+				continue
+			}
+		case stateInTripleDoubleQuoteString:
+			if strings.HasPrefix(remaining, `"""`) {
+				state = stateNormal
+				i += 3
+				continue
+			}
+		case stateInSingleLineCommentDash, stateInSingleLineCommentHash:
+			if char == '\n' {
+				state = stateNormal
+			}
+		case stateInMultiLineComment:
+			if strings.HasPrefix(remaining, "*/") {
+				state = stateNormal
+				i += 2
+				continue
+			}
+		case stateInRawSingleQuoteString:
+			if char == '\'' {
+				state = stateNormal
+			}
+		case stateInRawDoubleQuoteString:
+			if char == '"' {
+				state = stateNormal
+			}
+		case stateInRawTripleSingleQuoteString:
+			if strings.HasPrefix(remaining, "'''") {
+				state = stateNormal
+				i += 3
+				continue
+			}
+		case stateInRawTripleDoubleQuoteString:
+			if strings.HasPrefix(remaining, `"""`) {
+				state = stateNormal
+				i += 3
+				continue
+			}
+		}
+		i++
+	}
+
+	return false, nil
+}
+
 func formatTableID(parts []string, defaultProjectID string) (string, error) {
 	if len(parts) < 2 || len(parts) > 3 {
 		// Not a table identifier (could be a CTE, column, etc.).
-		// Return the consumed length so the main loop can skip this identifier.
 		return "", nil
 	}
 
-	var tableID string
 	if len(parts) == 3 { // project.dataset.table
-		tableID = strings.Join(parts, ".")
-	} else { // dataset.table
-		if defaultProjectID == "" {
-			return "", fmt.Errorf("query contains table '%s' without project ID, and no default project ID is provided", strings.Join(parts, "."))
-		}
-		tableID = fmt.Sprintf("%s.%s", defaultProjectID, strings.Join(parts, "."))
+		return strings.Join(parts, "."), nil
 	}
 
-	return tableID, nil
+	// dataset.table
+	if defaultProjectID == "" {
+		return "", fmt.Errorf("query contains table '%s' without project ID, and no default project ID is provided", strings.Join(parts, "."))
+	}
+	return fmt.Sprintf("%s.%s", defaultProjectID, strings.Join(parts, ".")), nil
 }
