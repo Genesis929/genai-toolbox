@@ -39,9 +39,11 @@ layer of security by controlling which datasets can be accessed:
 
 - **Without `allowedDatasets` restriction:** The tool can execute any valid
   GoogleSQL query.
-- **With `allowedDatasets` restriction:** The tool analyzes the query before execution to ensure that it only accesses the allowed datasets.
-  This check also supports authorized views by validating direct references against the allowed list.
-  To enforce this restriction, the following operations are also disallowed:
+- **With `allowedDatasets` restriction:** Before execution, the tool performs a
+  dry run to analyze the query.
+  It will reject the query if it attempts to access any table outside the
+  allowed `datasets` list. To enforce this restriction, the following operations
+  are also disallowed:
 
   - **Dataset-level operations** (e.g., `CREATE SCHEMA`, `ALTER SCHEMA`).
   - **Unanalyzable operations** where the accessed tables cannot be determined

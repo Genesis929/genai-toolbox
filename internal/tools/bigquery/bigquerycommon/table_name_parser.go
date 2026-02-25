@@ -20,47 +20,79 @@ import (
 	"unicode"
 )
 
+// parserState defines the state of the SQL parser's state machine.
 type parserState int
 
 const (
 	stateNormal parserState = iota
+	// String states
 	stateInSingleQuoteString
 	stateInDoubleQuoteString
 	stateInTripleSingleQuoteString
 	stateInTripleDoubleQuoteString
-	stateInSingleLineCommentDash
-	stateInSingleLineCommentHash
-	stateInMultiLineComment
 	stateInRawSingleQuoteString
 	stateInRawDoubleQuoteString
 	stateInRawTripleSingleQuoteString
 	stateInRawTripleDoubleQuoteString
+	// Comment states
+	stateInSingleLineCommentDash
+	stateInSingleLineCommentHash
+	stateInMultiLineComment
+)
+
+// SQL statement verbs
+const (
+	verbCreate = "create"
+	verbAlter  = "alter"
+	verbDrop   = "drop"
+	verbSelect = "select"
+	verbInsert = "insert"
+	verbUpdate = "update"
+	verbDelete = "delete"
+	verbMerge  = "merge"
 )
 
 var tableFollowsKeywords = map[string]bool{
 	"from":   true,
 	"join":   true,
-	"into":   true,
+	"into":   true, // INSERT INTO, MERGE INTO
 	"update": true,
-	"table":  true,
-	"using":  true,
-	"insert": true,
-	"merge":  true,
+	"table":  true, // CREATE TABLE, ALTER TABLE
+	"using":  true, // MERGE ... USING
+	"insert": true, // INSERT my_table
+	"merge":  true, // MERGE my_table
 }
 
 var tableContextExitKeywords = map[string]bool{
 	"where":     true,
-	"group":     true,
-	"order":     true,
+	"group":     true, // GROUP BY
+	"order":     true, // ORDER BY
 	"having":    true,
 	"limit":     true,
 	"window":    true,
 	"union":     true,
 	"intersect": true,
 	"except":    true,
-	"on":        true,
-	"set":       true,
-	"when":      true,
+	"on":        true, // JOIN ... ON
+	"set":       true, // UPDATE ... SET
+	"when":      true, // MERGE ... WHEN
+}
+
+var sqlStatementVerbs = map[string]bool{
+	verbCreate: true,
+	verbAlter:  true,
+	verbDrop:   true,
+	verbSelect: true,
+	verbInsert: true,
+	verbUpdate: true,
+	verbDelete: true,
+	verbMerge:  true,
+}
+
+var schemaOperationVerbs = map[string]bool{
+	verbCreate: true,
+	verbAlter:  true,
+	verbDrop:   true,
 }
 
 // hasPrefix checks if the runes starting at offset match the given prefix.
@@ -270,7 +302,7 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 				if keyword == "call" {
 					return 0, fmt.Errorf("CALL is not allowed when dataset restrictions are in place")
 				}
-				if (statementVerb == "create" || statementVerb == "alter" || statementVerb == "drop") &&
+				if schemaOperationVerbs[statementVerb] &&
 					(keyword == "schema" || keyword == "dataset") {
 					return 0, fmt.Errorf("dataset-level operations like '%s %s' are not allowed", strings.ToUpper(statementVerb), strings.ToUpper(keyword))
 				}
@@ -364,7 +396,7 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 						lastToken = keyword
 					}
 					// Also track statement verb for schema checks
-					if keyword == "select" || keyword == "insert" || keyword == "update" || keyword == "delete" || keyword == "merge" || keyword == "create" || keyword == "alter" || keyword == "drop" {
+					if sqlStatementVerbs[keyword] {
 						if statementVerb == "" || statementVerb == "with" {
 							statementVerb = keyword
 						}
