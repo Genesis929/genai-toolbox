@@ -43,18 +43,24 @@ var tableFollowsKeywords = map[string]bool{
 	"into":   true,
 	"update": true,
 	"table":  true,
+	"using":  true,
+	"insert": true,
+	"merge":  true,
 }
 
 var tableContextExitKeywords = map[string]bool{
-	"where":    true,
-	"group":    true,
-	"order":    true,
-	"having":   true,
-	"limit":    true,
-	"window":   true,
-	"union":    true,
+	"where":     true,
+	"group":     true,
+	"order":     true,
+	"having":    true,
+	"limit":     true,
+	"window":    true,
+	"union":     true,
 	"intersect": true,
-	"except":   true,
+	"except":    true,
+	"on":        true,
+	"set":       true,
+	"when":      true,
 }
 
 // hasPrefix checks if the runes starting at offset match the given prefix.
@@ -249,6 +255,26 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 				keyword := strings.ToLower(parts[0])
 				fullID := strings.ToLower(strings.Join(parts, "."))
 
+				// Security check for restricted statements
+				if keyword == "immediate" && lastToken == "execute" {
+					return 0, fmt.Errorf("EXECUTE IMMEDIATE is not allowed when dataset restrictions are in place")
+				}
+				if (lastToken == "create" || lastToken == "create or" || lastToken == "create or replace") &&
+					(keyword == "procedure" || keyword == "function" || keyword == "table function") {
+					tokenToReport := strings.ToUpper(lastToken)
+					if tokenToReport == "" {
+						tokenToReport = "CREATE"
+					}
+					return 0, fmt.Errorf("unanalyzable statements like '%s %s' are not allowed", tokenToReport, strings.ToUpper(keyword))
+				}
+				if keyword == "call" {
+					return 0, fmt.Errorf("CALL is not allowed when dataset restrictions are in place")
+				}
+				if (statementVerb == "create" || statementVerb == "alter" || statementVerb == "drop") &&
+					(keyword == "schema" || keyword == "dataset") {
+					return 0, fmt.Errorf("dataset-level operations like '%s %s' are not allowed", strings.ToUpper(statementVerb), strings.ToUpper(keyword))
+				}
+
 				if lastToken == "execute" && keyword == "immediate" {
 					// Found EXECUTE IMMEDIATE. The first expression must be the SQL string.
 					// Search for the next string literal.
@@ -336,6 +362,12 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 						lastToken = "create or replace"
 					} else {
 						lastToken = keyword
+					}
+					// Also track statement verb for schema checks
+					if keyword == "select" || keyword == "insert" || keyword == "update" || keyword == "delete" || keyword == "merge" || keyword == "create" || keyword == "alter" || keyword == "drop" {
+						if statementVerb == "" || statementVerb == "with" {
+							statementVerb = keyword
+						}
 					}
 				} else {
 					lastToken = ""
@@ -517,20 +549,23 @@ func IsAnyTableExplicitlyReferenced(sql, defaultProjectID string, targetTableIDs
 					return false, err
 				}
 				if consumed > 0 {
-					if len(parts) < 2 {
-						i += consumed
-						continue
-					}
 					fullID := strings.ToLower(strings.Join(parts, "."))
 					for target := range targets {
-						// Match exact table name or as a prefix for column references.
+						// Exact match or as a prefix for column references.
 						if fullID == target || strings.HasPrefix(fullID, target+".") {
 							return true, nil
 						}
-						// Also try matching with the default project ID prefix.
+						// Match without any backticks.
+						cleanFullID := strings.ReplaceAll(fullID, "`", "")
+						cleanTarget := strings.ReplaceAll(target, "`", "")
+						if cleanFullID == cleanTarget || strings.HasPrefix(cleanFullID, cleanTarget+".") {
+							return true, nil
+						}
+						// Try matching with the default project ID prefix.
 						if defaultProjectID != "" {
-							withDefault := strings.ToLower(defaultProjectID + "." + fullID)
-							if withDefault == target || strings.HasPrefix(withDefault, target+".") {
+							cleanDefaultProjectID := strings.ReplaceAll(strings.ToLower(defaultProjectID), "`", "")
+							withDefault := cleanDefaultProjectID + "." + cleanFullID
+							if withDefault == cleanTarget || strings.HasPrefix(withDefault, cleanTarget+".") {
 								return true, nil
 							}
 						}

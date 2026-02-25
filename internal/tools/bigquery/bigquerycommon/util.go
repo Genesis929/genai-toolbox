@@ -82,16 +82,6 @@ func ValidateQueryAgainstAllowedDatasets(
 	if dryRunJob.Statistics == nil || dryRunJob.Statistics.Query == nil {
 		return nil, fmt.Errorf("dry run failed to return query statistics")
 	}
-	statementType := dryRunJob.Statistics.Query.StatementType
-	// Common restricted operations
-	switch statementType {
-	case "CREATE_SCHEMA", "DROP_SCHEMA", "ALTER_SCHEMA":
-		return nil, fmt.Errorf("dataset-level operations like '%s' are not allowed when dataset restrictions are in place", statementType)
-	case "CREATE_FUNCTION", "CREATE_TABLE_FUNCTION", "CREATE_PROCEDURE":
-		return nil, fmt.Errorf("creating stored routines ('%s') is not allowed when dataset restrictions are in place, as their contents cannot be safely analyzed", statementType)
-	case "CALL":
-		return nil, fmt.Errorf("calling stored procedures ('%s') is not allowed when dataset restrictions are in place, as their contents cannot be safely analyzed", statementType)
-	}
 
 	// Use a map to avoid duplicate table names from the dry run result.
 	tableIDSet := make(map[string]struct{})

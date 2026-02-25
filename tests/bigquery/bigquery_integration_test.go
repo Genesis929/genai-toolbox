@@ -36,7 +36,6 @@ import (
 	"github.com/googleapis/genai-toolbox/tests"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/googleapi"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -87,6 +86,10 @@ func TestBigQueryToolEndpoints(t *testing.T) {
 
 	// create table name with UUID
 	datasetName := fmt.Sprintf("temp_toolbox_test_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
+
+	cleanupDatasets := ensureTeardownDatasets(ctx, client, datasetName)
+	defer cleanupDatasets(t)
+
 	tableName := fmt.Sprintf("param_table_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
 	tableNameParam := fmt.Sprintf("`%s.%s.%s`",
 		BigqueryProject,
@@ -218,6 +221,10 @@ func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
 	allowedDatasetName1 := fmt.Sprintf("allowed_dataset_1_%s", baseName)
 	allowedDatasetName2 := fmt.Sprintf("allowed_dataset_2_%s", baseName)
 	disallowedDatasetName := fmt.Sprintf("disallowed_dataset_%s", baseName)
+
+	cleanupDatasets := ensureTeardownDatasets(ctx, client, allowedDatasetName1, allowedDatasetName2, disallowedDatasetName)
+	defer cleanupDatasets(t)
+
 	allowedTableName1 := "allowed_table_1"
 	allowedTableName2 := "allowed_table_2"
 	disallowedTableName := "disallowed_table"
@@ -285,19 +292,11 @@ func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
 
 	// Create Forecast views
 	for _, dsName := range []string{allowedDatasetName1, allowedDatasetName2} {
-		if err := client.Dataset(dsName).Table(viewInAllowedPointingToDisallowedForecastName).Create(ctx, &bigqueryapi.TableMetadata{
-			ViewQuery: fmt.Sprintf("SELECT * FROM %s", disallowedForecastTableFullName),
-		}); err != nil {
-			t.Fatalf("failed to create forecast view in %s: %v", dsName, err)
-		}
-		defer client.Dataset(dsName).Table(viewInAllowedPointingToDisallowedForecastName).Delete(ctx)
+		teardownForecastView := setupBigQueryView(t, ctx, client, dsName, viewInAllowedPointingToDisallowedForecastName, fmt.Sprintf("SELECT * FROM %s", disallowedForecastTableFullName))
+		defer teardownForecastView(t)
 
-		if err := client.Dataset(dsName).Table(viewInAllowedPointingToDisallowedAnalyzeName).Create(ctx, &bigqueryapi.TableMetadata{
-			ViewQuery: fmt.Sprintf("SELECT * FROM %s", disallowedAnalyzeContributionTableFullName),
-		}); err != nil {
-			t.Fatalf("failed to create analyze view in %s: %v", dsName, err)
-		}
-		defer client.Dataset(dsName).Table(viewInAllowedPointingToDisallowedAnalyzeName).Delete(ctx)
+		teardownAnalyzeView := setupBigQueryView(t, ctx, client, dsName, viewInAllowedPointingToDisallowedAnalyzeName, fmt.Sprintf("SELECT * FROM %s", disallowedAnalyzeContributionTableFullName))
+		defer teardownAnalyzeView(t)
 	}
 
 	// Authorize ALL views to access the disallowed dataset
@@ -660,6 +659,29 @@ func getBigQueryTmplToolStatement() (string, string) {
 	return tmplSelectCombined, tmplSelectFilterCombined
 }
 
+func ensureTeardownDatasets(ctx context.Context, client *bigqueryapi.Client, datasetNames ...string) func(*testing.T) {
+	return func(t *testing.T) {
+		for _, dsName := range datasetNames {
+			if err := client.Dataset(dsName).DeleteWithContents(ctx); err != nil {
+				t.Logf("failed to cleanup dataset %s: %v", dsName, err)
+			}
+		}
+	}
+}
+
+func setupBigQueryView(t *testing.T, ctx context.Context, client *bigqueryapi.Client, datasetName, viewName, query string) func(*testing.T) {
+	if err := client.Dataset(datasetName).Table(viewName).Create(ctx, &bigqueryapi.TableMetadata{
+		ViewQuery: query,
+	}); err != nil {
+		t.Fatalf("failed to create view %s in %s: %v", viewName, datasetName, err)
+	}
+	return func(t *testing.T) {
+		if err := client.Dataset(datasetName).Table(viewName).Delete(ctx); err != nil {
+			t.Errorf("failed to delete view %s in %s: %v", viewName, datasetName, err)
+		}
+	}
+}
+
 func setupBigQueryTable(t *testing.T, ctx context.Context, client *bigqueryapi.Client, createStatement, insertStatement, datasetName string, tableName string, params []bigqueryapi.QueryParameter) func(*testing.T) {
 	// Create dataset
 	dataset := client.Dataset(datasetName)
@@ -722,19 +744,6 @@ func setupBigQueryTable(t *testing.T, ctx context.Context, client *bigqueryapi.C
 		}
 		if err := dropStatus.Err(); err != nil {
 			t.Errorf("Error dropping table %s: %v", tableName, err)
-		}
-
-		// tear down dataset
-		datasetToTeardown := client.Dataset(datasetName)
-		tablesIterator := datasetToTeardown.Tables(ctx)
-		_, err = tablesIterator.Next()
-
-		if err == iterator.Done {
-			if err := datasetToTeardown.Delete(ctx); err != nil {
-				t.Errorf("Failed to delete dataset %s: %v", datasetName, err)
-			}
-		} else if err != nil {
-			t.Errorf("Failed to list tables in dataset %s to check emptiness: %v.", datasetName, err)
 		}
 	}
 }
@@ -2796,28 +2805,27 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 			name:           "invoke on disallowed table",
 			sql:            fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
 			wantStatusCode: http.StatusOK,
-			wantInError: fmt.Sprintf("query accesses dataset '%s', which is not in the allowed list",
-				strings.Join(
-					strings.Split(strings.Trim(disallowedTableFullName, "`"), ".")[0:2],
-					".")),
+			wantInError: fmt.Sprintf("access to dataset '%s.%s' is not allowed",
+				strings.Split(strings.Trim(disallowedTableFullName, "`"), ".")[0],
+				strings.Split(strings.Trim(disallowedTableFullName, "`"), ".")[1]),
 		},
 		{
 			name:           "disallowed create schema",
 			sql:            "CREATE SCHEMA another_dataset",
 			wantStatusCode: http.StatusOK,
-			wantInError:    "dataset-level operations like 'CREATE_SCHEMA' are not allowed",
+			wantInError:    "dataset-level operations like 'CREATE SCHEMA' are not allowed",
 		},
 		{
 			name:           "disallowed alter schema",
 			sql:            fmt.Sprintf("ALTER SCHEMA %s SET OPTIONS(description='new one')", allowedDatasetID),
 			wantStatusCode: http.StatusOK,
-			wantInError:    "dataset-level operations like 'ALTER_SCHEMA' are not allowed",
+			wantInError:    "dataset-level operations like 'ALTER SCHEMA' are not allowed",
 		},
 		{
 			name:           "disallowed create function",
 			sql:            fmt.Sprintf("CREATE FUNCTION %s.my_func() RETURNS INT64 AS (1)", allowedDatasetID),
 			wantStatusCode: http.StatusOK,
-			wantInError:    "creating stored routines ('CREATE_FUNCTION') is not allowed",
+			wantInError:    "unanalyzable statements like 'CREATE FUNCTION' are not allowed",
 		},
 		{
 			name:           "disallowed create procedure",
@@ -2829,7 +2837,7 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 			name:           "disallowed execute immediate",
 			sql:            "EXECUTE IMMEDIATE 'SELECT 1'",
 			wantStatusCode: http.StatusOK,
-			wantInError:    "EXECUTE IMMEDIATE is not allowed when dataset restrictions are in place",
+			wantInError:    "EXECUTE IMMEDIATE is not allowed",
 		},
 	}
 
@@ -3160,7 +3168,7 @@ func runForecastWithRestriction(t *testing.T, allowedTableFullName, disallowedTa
 			name:           "invoke with query on disallowed table",
 			historyData:    fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
 			wantStatusCode: http.StatusOK,
-			wantInError:    fmt.Sprintf("query accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
+			wantInError:    fmt.Sprintf("access to dataset '%s' is not allowed", disallowedDatasetFQN),
 		},
 	}
 
@@ -3267,7 +3275,7 @@ func runAnalyzeContributionWithRestriction(t *testing.T, allowedTableFullName, d
 			name:           "invoke with query on disallowed table",
 			inputData:      fmt.Sprintf("SELECT * FROM %s", disallowedTableFullName),
 			wantStatusCode: http.StatusOK,
-			wantInError:    fmt.Sprintf("query accesses dataset '%s', which is not in the allowed list", disallowedDatasetFQN),
+			wantInError:    fmt.Sprintf("access to dataset '%s' is not allowed", disallowedDatasetFQN),
 		},
 	}
 
