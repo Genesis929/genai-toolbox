@@ -8155,12 +8155,9 @@ Oracle database. It&amp;rsquo;s compatible with the following source:&lt;/p>
 &lt;p>The specified SQL statement is executed using &lt;a href="https://docs.oracle.com/javase/tutorial/jdbc/basics/prepared.html">prepared statements&lt;/a>
 for security and performance. It expects parameter placeholders in the SQL query
 to be in the native Oracle format (e.g., &lt;code>:1&lt;/code>, &lt;code>:2&lt;/code>).&lt;/p>
-&lt;h2 id="example">Example&lt;/h2>
-&lt;blockquote>
-&lt;p>&lt;strong>Note:&lt;/strong> This tool uses parameterized queries to prevent SQL injections.
-Query parameters can be used as substitutes for arbitrary expressions.
-Parameters cannot be used as substitutes for identifiers, column names, table
-names, or other parts of the query.&lt;/p></description></item><item><title>postgres-database-overview</title><link>https://Genesis929.github.io/genai-toolbox/dev/resources/tools/postgres/postgres-database-overview/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://Genesis929.github.io/genai-toolbox/dev/resources/tools/postgres/postgres-database-overview/</guid><description>&lt;h2 id="about">About&lt;/h2>
+&lt;p>By default, tools are configured as &lt;strong>read-only&lt;/strong> (SAFE mode). To execute data modification
+statements (INSERT, UPDATE, DELETE), you must explicitly set the &lt;code>readOnly&lt;/code>
+field to &lt;code>false&lt;/code>.&lt;/p></description></item><item><title>postgres-database-overview</title><link>https://Genesis929.github.io/genai-toolbox/dev/resources/tools/postgres/postgres-database-overview/</link><pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate><guid>https://Genesis929.github.io/genai-toolbox/dev/resources/tools/postgres/postgres-database-overview/</guid><description>&lt;h2 id="about">About&lt;/h2>
 &lt;p>The &lt;code>postgres-database-overview&lt;/code> fetches the current state of the PostgreSQL
 server. It&amp;rsquo;s compatible with any of the following sources:&lt;/p>
 &lt;ul>
@@ -10815,6 +10812,8 @@ your preferred virtual environment tool for managing dependencies e.g.
 
 
 
+
+
  &lt;p>If you plan to use &lt;strong>Google Cloud’s Vertex AI&lt;/strong> with your agent (e.g., using
 &lt;code>vertexai=True&lt;/code> or a Google GenAI model), follow these one-time setup steps for
 local development:&lt;/p>
@@ -11049,24 +11048,7 @@ roles):&lt;/p>
  &lt;div class="tab-body tab-pane fade show active"
  id="tabs-00-00" role="tabpanel" aria-labelled-by="tabs-00-00-tab" tabindex="0">
  &lt;p>The following example demonstrates how to use the &lt;code>beforeToolCallback&lt;/code> and &lt;code>afterToolCallback&lt;/code> hooks in the ADK &lt;code>LlmAgent&lt;/code> to implement pre and post processing logic.&lt;/p>
-&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-go" data-lang="go">&lt;span class="line">&lt;span class="cl">
-&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm">/*
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * Copyright 2026 Google LLC
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> *
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * Licensed under the Apache License, Version 2.0 (the &amp;#34;License&amp;#34;);
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * you may not use this file except in compliance with the License.
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * You may obtain a copy of the License at
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> *
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * http://www.apache.org/licenses/LICENSE-2.0
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> *
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * Unless required by applicable law or agreed to in writing, software
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * distributed under the License is distributed on an &amp;#34;AS IS&amp;#34; BASIS,
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * See the License for the specific language governing permissions and
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> * limitations under the License.
-&lt;/span>&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="cm"> */&lt;/span>
-&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">
-&lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="kn">package&lt;/span> &lt;span class="nx">main&lt;/span>
+&lt;div class="highlight">&lt;pre tabindex="0" class="chroma">&lt;code class="language-go" data-lang="go">&lt;span class="line">&lt;span class="cl">&lt;span class="kn">package&lt;/span> &lt;span class="nx">main&lt;/span>
 &lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">
 &lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">&lt;span class="kn">import&lt;/span> &lt;span class="p">(&lt;/span>
 &lt;/span>&lt;/span>&lt;span class="line">&lt;span class="cl">	&lt;span class="s">&amp;#34;context&amp;#34;&lt;/span>
@@ -11344,6 +11326,8 @@ roles):&lt;/p>
  
  
  
+
+
 
 
 
@@ -12038,6 +12022,8 @@ section.&lt;/p>
  
  
  
+
+
 
 
 
