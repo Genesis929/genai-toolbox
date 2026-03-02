@@ -1044,9 +1044,9 @@ func RunMCPToolCallMethod(t *testing.T, myFailToolWant, select1Want string, opti
 			wantBody:       "{\"jsonrpc\":\"2.0\",\"id\":\"invoke my-custom-client-auth-tool\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"f0_\\\":1}\"}]}}",
 		},
 		{
-			name:    "MCP Invoke my-custom-client-auth-tool without access token",
-			enabled: configs.supportClientAuth,
-			api:     "http://127.0.0.1:5000/mcp",
+			name:          "MCP Invoke my-custom-client-auth-tool without access token",
+			enabled:       configs.supportClientAuth,
+			api:           "http://127.0.0.1:5000/mcp",
 			requestHeader: map[string]string{},
 			requestBody: jsonrpc.JSONRPCRequest{
 				Jsonrpc: "2.0",
