@@ -123,6 +123,7 @@ func (r Config) SourceConfigType() string {
 	// Returns BigQuery source type
 	return SourceType
 }
+
 func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.Source, error) {
 	if r.WriteMode == "" {
 		r.WriteMode = WriteModeAllowed
@@ -137,7 +138,7 @@ func (r Config) Initialize(ctx context.Context, tracer trace.Tracer) (sources.So
 		// when using client OAuth, a new session is created every
 		// time a BigQuery tool is invoked. Therefore, no session data can
 		// be preserved as needed by the protected mode.
-		return nil, fmt.Errorf("writeMode 'protected' cannot be used with useClientOAuth 'true'")
+		return nil, fmt.Errorf("writeMode 'protected' cannot be used with useClientOAuth enabled")
 	}
 
 	if strings.ToLower(r.UseClientOAuth) != "false" && r.UseClientOAuth != "" && r.ImpersonateServiceAccount != "" {

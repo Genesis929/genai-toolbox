@@ -109,7 +109,7 @@ OAuth access token for authentication. By default, this token is parsed from the
 
 If you need to use a non-standard header for the access token (e.g., to avoid
 conflicts with other services like Cloud Run), you can specify the header name
-in the `useClientOAuth` field (e.g., `useClientOAuth: X-Looker-Auth`).
+in the `useClientOAuth` field (e.g., `useClientOAuth: X-BigQuery-Auth`).
 
 This method allows Toolbox to make queries to [BigQuery][bigquery-docs] on behalf
 of the client or the end-user.
