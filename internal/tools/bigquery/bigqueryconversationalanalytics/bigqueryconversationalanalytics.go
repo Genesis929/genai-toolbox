@@ -405,8 +405,13 @@ func extractDataResult(msg map[string]any) map[string]any {
 // formatDataRetrieved transforms the raw result map into the simplified Toolbox format.
 func formatDataRetrieved(result map[string]any, maxRows int) map[string]any {
 	rawData, _ := result["data"].([]any)
-	schema, _ := result["schema"].(map[string]any)
-	fields, _ := schema["fields"].([]any)
+
+	var fields []any
+	if schema, ok := result["schema"].(map[string]any); ok {
+		if f, ok := schema["fields"].([]any); ok {
+			fields = f
+		}
+	}
 
 	var headers []string
 	for _, f := range fields {
