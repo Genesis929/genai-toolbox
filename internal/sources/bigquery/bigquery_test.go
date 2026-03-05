@@ -115,6 +115,46 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 			},
 		},
 		{
+			desc: "use client auth with unquoted true",
+			in: `
+			kind: sources
+			name: my-instance
+			type: bigquery
+			project: my-project
+			location: us
+			useClientOAuth: true
+			`,
+			want: map[string]sources.SourceConfig{
+				"my-instance": bigquery.Config{
+					Name:           "my-instance",
+					Type:           bigquery.SourceType,
+					Project:        "my-project",
+					Location:       "us",
+					UseClientOAuth: "true",
+				},
+			},
+		},
+		{
+			desc: "use client auth with unquoted false",
+			in: `
+			kind: sources
+			name: my-instance
+			type: bigquery
+			project: my-project
+			location: us
+			useClientOAuth: false
+			`,
+			want: map[string]sources.SourceConfig{
+				"my-instance": bigquery.Config{
+					Name:           "my-instance",
+					Type:           bigquery.SourceType,
+					Project:        "my-project",
+					Location:       "us",
+					UseClientOAuth: "false",
+				},
+			},
+		},
+		{
 			desc: "with allowed datasets example",
 			in: `
 			kind: sources
