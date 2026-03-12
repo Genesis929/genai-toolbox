@@ -227,7 +227,7 @@ steps:
         .ci/test_with_coverage.sh \
           "BigQuery" \
           bigquery \
-          bigquery || echo "Integration tests failed." # TODO(https://github.com/googleapis/genai-toolbox/issues/2687): Fix flakiness and re-enable.
+          bigquery
 
   - id: "cloud-gda"
     name: golang:1
