@@ -20,9 +20,11 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/googleapis/genai-toolbox/internal/testutils"
 	"github.com/googleapis/genai-toolbox/tests"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -113,6 +115,9 @@ func TestAlloyDBOmni(t *testing.T) {
 	os.Setenv("ALLOYDB_OMNI_PASSWORD", AlloyDBPass)
 	os.Setenv("ALLOYDB_OMNI_DATABASE", AlloyDBDatabase)
 
+	// Generate a unique ID
+	uniqueID := strings.ReplaceAll(uuid.New().String(), "-", "")
+
 	args := []string{"--prebuilt", "alloydb-omni"}
 
 	pool, err := initPostgresConnectionPool(AlloyDBHost, AlloyDBPort, AlloyDBUser, AlloyDBPass, AlloyDBDatabase)
@@ -138,7 +143,7 @@ func TestAlloyDBOmni(t *testing.T) {
 
 	// Run Postgres prebuilt tool tests
 	tests.RunPostgresListViewsTest(t, ctx, pool)
-	tests.RunPostgresListSchemasTest(t, ctx, pool)
+	tests.RunPostgresListSchemasTest(t, ctx, pool, AlloyDBUser, uniqueID)
 	tests.RunPostgresListActiveQueriesTest(t, ctx, pool)
 	tests.RunPostgresListAvailableExtensionsTest(t)
 	tests.RunPostgresListInstalledExtensionsTest(t)
@@ -157,4 +162,16 @@ func TestAlloyDBOmni(t *testing.T) {
 	tests.RunPostgresListDatabaseStatsTest(t, ctx, pool)
 	tests.RunPostgresListRolesTest(t, ctx, pool)
 	tests.RunPostgresListStoredProcedureTest(t, ctx, pool)
+
+	toolsToTest := map[string]string{
+		"list_autovacuum_configurations":    `{}`,
+		"list_memory_configurations":        `{}`,
+		"list_top_bloated_tables":           `{"limit": 10}`,
+		"list_replication_slots":            `{}`,
+		"list_invalid_indexes":              `{}`,
+		"get_query_plan":                    `{"query": "SELECT 1"}`,
+		"list_columnar_configurations":      `{}`,
+		"list_columnar_recommended_columns": `{}`,
+	}
+	tests.RunStatementToolsTest(t, toolsToTest)
 }

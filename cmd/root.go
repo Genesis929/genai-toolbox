@@ -33,6 +33,8 @@ import (
 	// Importing the cmd/internal package also import packages for side effect of registration
 	"github.com/googleapis/genai-toolbox/cmd/internal"
 	"github.com/googleapis/genai-toolbox/cmd/internal/invoke"
+	"github.com/googleapis/genai-toolbox/cmd/internal/migrate"
+	"github.com/googleapis/genai-toolbox/cmd/internal/serve"
 	"github.com/googleapis/genai-toolbox/cmd/internal/skills"
 	"github.com/googleapis/genai-toolbox/internal/auth"
 	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
@@ -110,29 +112,22 @@ func NewCommand(opts *internal.ToolboxOptions) *cobra.Command {
 
 	// setup flags that are common across all commands
 	internal.PersistentFlags(cmd, opts)
-
 	flags := cmd.Flags()
-
-	flags.StringVarP(&opts.Cfg.Address, "address", "a", "127.0.0.1", "Address of the interface the server will listen on.")
-	flags.IntVarP(&opts.Cfg.Port, "port", "p", 5000, "Port the server will listen on.")
-
+	internal.ConfigFileFlags(flags, opts)
+	internal.ServeFlags(flags, opts)
 	flags.StringVar(&opts.ToolsFile, "tools_file", "", "File path specifying the tool configuration. Cannot be used with --tools-files, or --tools-folder.")
 	// deprecate tools_file
 	_ = flags.MarkDeprecated("tools_file", "please use --tools-file instead")
-	flags.BoolVar(&opts.Cfg.Stdio, "stdio", false, "Listens via MCP STDIO instead of acting as a remote HTTP server.")
 	flags.BoolVar(&opts.Cfg.DisableReload, "disable-reload", false, "Disables dynamic reloading of tools file.")
-	flags.BoolVar(&opts.Cfg.UI, "ui", false, "Launches the Toolbox UI web server.")
-	// TODO: Insecure by default. Might consider updating this for v1.0.0
-	flags.StringSliceVar(&opts.Cfg.AllowedOrigins, "allowed-origins", []string{"*"}, "Specifies a list of origins permitted to access this server. Defaults to '*'.")
-	flags.StringSliceVar(&opts.Cfg.AllowedHosts, "allowed-hosts", []string{"*"}, "Specifies a list of hosts permitted to access this server. Defaults to '*'.")
-
+	flags.IntVar(&opts.Cfg.PollInterval, "poll-interval", 0, "Specifies the polling frequency (seconds) for configuration file updates.")
 	// wrap RunE command so that we have access to original Command object
 	cmd.RunE = func(*cobra.Command, []string) error { return run(cmd, opts) }
 
-	// Register subcommands for tool invocation
+	// Register subcommands
 	cmd.AddCommand(invoke.NewCommand(opts))
-	// Register subcommands for skill generation
 	cmd.AddCommand(skills.NewCommand(opts))
+	cmd.AddCommand(serve.NewCommand(opts))
+	cmd.AddCommand(migrate.NewCommand(opts))
 
 	return cmd
 }
@@ -195,8 +190,50 @@ func validateReloadEdits(
 	return sourcesMap, authServicesMap, embeddingModelsMap, toolsMap, toolsetsMap, promptsMap, promptsetsMap, nil
 }
 
+// Helper to check if a file has a newer ModTime than stored in the map
+func checkModTime(path string, mTime time.Time, lastSeen map[string]time.Time) bool {
+	if mTime.After(lastSeen[path]) {
+		lastSeen[path] = mTime
+		return true
+	}
+	return false
+}
+
+// Helper to scan watched files and check their modification times in polling system
+func scanWatchedFiles(watchingFolder bool, folderToWatch string, watchedFiles map[string]bool, lastSeen map[string]time.Time) (map[string]bool, bool, error) {
+	changed := false
+	currentDiskFiles := make(map[string]bool)
+	if watchingFolder {
+		files, err := os.ReadDir(folderToWatch)
+		if err != nil {
+			return nil, changed, fmt.Errorf("error reading tools folder %w", err)
+		}
+		for _, f := range files {
+			if !f.IsDir() && (strings.HasSuffix(f.Name(), ".yaml") || strings.HasSuffix(f.Name(), ".yml")) {
+				fullPath := filepath.Join(folderToWatch, f.Name())
+				currentDiskFiles[fullPath] = true
+				if info, err := f.Info(); err == nil {
+					if checkModTime(fullPath, info.ModTime(), lastSeen) {
+						changed = true
+					}
+				}
+			}
+		}
+	} else {
+		for f := range watchedFiles {
+			if info, err := os.Stat(f); err == nil {
+				currentDiskFiles[f] = true
+				if checkModTime(f, info.ModTime(), lastSeen) {
+					changed = true
+				}
+			}
+		}
+	}
+	return currentDiskFiles, changed, nil
+}
+
 // watchChanges checks for changes in the provided yaml tools file(s) or folder.
-func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles map[string]bool, s *server.Server) {
+func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles map[string]bool, s *server.Server, pollTickerSecond int) {
 	logger, err := util.LoggerFromContext(ctx)
 	if err != nil {
 		panic(err)
@@ -204,7 +241,7 @@ func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles m
 
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
-		logger.WarnContext(ctx, "error setting up new watcher %s", err)
+		logger.WarnContext(ctx, fmt.Sprintf("error setting up new watcher %s", err))
 		return
 	}
 
@@ -238,6 +275,23 @@ func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles m
 		logger.DebugContext(ctx, fmt.Sprintf("Added directory %s to watcher.", dir))
 	}
 
+	lastSeen := make(map[string]time.Time)
+	var pollTickerChan <-chan time.Time
+	if pollTickerSecond > 0 {
+		ticker := time.NewTicker(time.Duration(pollTickerSecond) * time.Second)
+		defer ticker.Stop()
+		pollTickerChan = ticker.C // Assign the channel
+		logger.DebugContext(ctx, fmt.Sprintf("NFS polling enabled every %v", pollTickerSecond))
+
+		// Pre-populate lastSeen to avoid an initial spurious reload
+		_, _, err = scanWatchedFiles(watchingFolder, folderToWatch, watchedFiles, lastSeen)
+		if err != nil {
+			logger.WarnContext(ctx, err.Error())
+		}
+	} else {
+		logger.DebugContext(ctx, "NFS polling disabled (interval is 0)")
+	}
+
 	// debounce timer is used to prevent multiple writes triggering multiple reloads
 	debounceDelay := 100 * time.Millisecond
 	debounce := time.NewTimer(1 * time.Minute)
@@ -248,13 +302,36 @@ func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles m
 		case <-ctx.Done():
 			logger.DebugContext(ctx, "file watcher context cancelled")
 			return
+		case <-pollTickerChan:
+			// Get files that are currently on disk
+			currentDiskFiles, changed, err := scanWatchedFiles(watchingFolder, folderToWatch, watchedFiles, lastSeen)
+			if err != nil {
+				logger.WarnContext(ctx, err.Error())
+				continue
+			}
+
+			// Check for Deletions
+			// If it was in lastSeen but is NOT in currentDiskFiles, it's
+			// deleted; we will need to reload the server.
+			for path := range lastSeen {
+				if !currentDiskFiles[path] {
+					logger.DebugContext(ctx, fmt.Sprintf("File deleted (detected via polling): %s", path))
+					delete(lastSeen, path)
+					changed = true
+				}
+			}
+			if changed {
+				logger.DebugContext(ctx, "File change detected via polling")
+				// once this timer runs out, it will trigger debounce.C
+				debounce.Reset(debounceDelay)
+			}
 		case err, ok := <-w.Errors:
 			if !ok {
 				logger.WarnContext(ctx, "file watcher was closed unexpectedly")
 				return
 			}
 			if err != nil {
-				logger.WarnContext(ctx, "file watcher error %s", err)
+				logger.WarnContext(ctx, fmt.Sprintf("file watcher error %s", err))
 				return
 			}
 
@@ -283,22 +360,24 @@ func watchChanges(ctx context.Context, watchDirs map[string]bool, watchedFiles m
 
 		case <-debounce.C:
 			debounce.Stop()
-			var reloadedToolsFile internal.ToolsFile
-
+			var allFiles []string
+			parser := internal.ToolsFileParser{}
 			if watchingFolder {
 				logger.DebugContext(ctx, "Reloading tools folder.")
-				reloadedToolsFile, err = internal.LoadAndMergeToolsFolder(ctx, folderToWatch)
+				allFiles, err = internal.GetPathsFromToolsFolder(ctx, folderToWatch)
 				if err != nil {
-					logger.WarnContext(ctx, "error loading tools folder %s", err)
+					logger.WarnContext(ctx, fmt.Sprintf("error loading tools folder %s", err))
 					continue
 				}
+
 			} else {
-				logger.DebugContext(ctx, "Reloading tools file(s).")
-				reloadedToolsFile, err = internal.LoadAndMergeToolsFiles(ctx, slices.Collect(maps.Keys(watchedFiles)))
-				if err != nil {
-					logger.WarnContext(ctx, "error loading tools files %s", err)
-					continue
-				}
+				allFiles = slices.Collect(maps.Keys(watchedFiles))
+			}
+			logger.DebugContext(ctx, "Reloading tools file(s).")
+			reloadedToolsFile, err := parser.LoadAndMergeToolsFiles(ctx, allFiles)
+			if err != nil {
+				logger.WarnContext(ctx, fmt.Sprintf("error loading tools files %s", err))
+				continue
 			}
 
 			err = handleDynamicReload(ctx, reloadedToolsFile, s)
@@ -370,7 +449,7 @@ func run(cmd *cobra.Command, opts *internal.ToolboxOptions) error {
 		_ = shutdown(ctx)
 	}()
 
-	isCustomConfigured, err := opts.LoadConfig(ctx)
+	isCustomConfigured, err := opts.LoadConfig(ctx, &internal.ToolsFileParser{})
 	if err != nil {
 		return err
 	}
@@ -417,7 +496,7 @@ func run(cmd *cobra.Command, opts *internal.ToolboxOptions) error {
 	if isCustomConfigured && !opts.Cfg.DisableReload {
 		watchDirs, watchedFiles := resolveWatcherInputs(opts.ToolsFile, opts.ToolsFiles, opts.ToolsFolder)
 		// start watching the file(s) or folder for changes to trigger dynamic reloading
-		go watchChanges(ctx, watchDirs, watchedFiles, s)
+		go watchChanges(ctx, watchDirs, watchedFiles, s, opts.Cfg.PollInterval)
 	}
 
 	// wait for either the server to error out or the command's context to be canceled

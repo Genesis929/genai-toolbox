@@ -487,6 +487,20 @@ See [Usage Examples](../reference/cli.md#examples).
     *   `search_aspect_types`: Finds aspect types relevant to the
         query.
 
+## Dataproc
+
+*   `--prebuilt` value: `dataproc`
+*   **Environment Variables:**
+    *   `DATAPROC_PROJECT`: The GCP project ID.
+    *   `DATAPROC_REGION`: The Dataproc region.
+*   **Permissions:**
+    *   **Dataproc Viewer** (`roles/dataproc.viewer`) to examine clusters and jobs.
+*   **Tools:**
+    *   `list_clusters`: Lists Dataproc clusters.
+    *   `get_cluster`: Gets a Dataproc cluster.
+    *   `list_jobs`: Lists Dataproc jobs.
+    *   `get_job`: Gets a Dataproc job.
+
 ## Elasticsearch
 
 *   `--prebuilt` value: `elasticsearch`
@@ -554,6 +568,24 @@ See [Usage Examples](../reference/cli.md#examples).
     *   `add_dashboard_element`: Adds a tile to a dashboard.
     *   `add_dashboard_filter`: Adds a filter to a dashboard.
     *   `generate_embed_url`: Generate an embed url for content.
+
+## Looker Dev
+
+*   `--prebuilt` value: `looker-dev`
+*   May be used in combination with Looker, `--prebuilt looker,looker-dev`
+*   **Environment Variables:**
+    *   `LOOKER_BASE_URL`: The URL of your Looker instance.
+    *   `LOOKER_CLIENT_ID`: The client ID for the Looker API.
+    *   `LOOKER_CLIENT_SECRET`: The client secret for the Looker API.
+    *   `LOOKER_VERIFY_SSL`: Whether to verify SSL certificates.
+    *   `LOOKER_USE_CLIENT_OAUTH`: Whether to use OAuth for authentication.
+    *   `LOOKER_SHOW_HIDDEN_MODELS`: Whether to show hidden models.
+    *   `LOOKER_SHOW_HIDDEN_EXPLORES`: Whether to show hidden explores.
+    *   `LOOKER_SHOW_HIDDEN_FIELDS`: Whether to show hidden fields.
+*   **Permissions:**
+    *   A Looker account with permissions to access the desired projects
+        and LookML is required.
+*   **Tools:**
     *   `health_pulse`: Test the health of a Looker instance.
     *   `health_analyze`: Analyze the LookML usage of a Looker instance.
     *   `health_vacuum`: Suggest LookML elements that can be removed.
@@ -564,12 +596,19 @@ See [Usage Examples](../reference/cli.md#examples).
     *   `create_project_file`: Create a new LookML file.
     *   `update_project_file`: Update an existing LookML file.
     *   `delete_project_file`: Delete a LookML file.
+    *   `get_project_directories`: Retrieves a list of project directories for a given LookML project.
+    *   `create_project_directory`: Creates a new directory within a specified LookML project.
+    *   `delete_project_directory`: Deletes a directory from a specified LookML project.
     *   `validate_project`: Check the syntax of a LookML project.
     *   `get_connections`: Get the available connections in a Looker instance.
     *   `get_connection_schemas`: Get the available schemas in a connection.
     *   `get_connection_databases`: Get the available databases in a connection.
     *   `get_connection_tables`: Get the available tables in a connection.
     *   `get_connection_table_columns`: Get the available columns for a table.
+    *   `get_lookml_tests`: Retrieves a list of available LookML tests for a project.
+    *   `run_lookml_tests`: Executes specific LookML tests within a project.
+    *   `create_view_from_table`: Generates boilerplate LookML views directly from the database schema.
+    *   `project_git_branch`: Fetch and manipulate the git branch of a LookML project.
 
 ## Looker Conversational Analytics
 
@@ -730,6 +769,9 @@ See [Usage Examples](../reference/cli.md#examples).
     *   `cancel_batch`: Cancels a Spark batch.
     *   `create_pyspark_batch`: Creates a PySpark batch.
     *   `create_spark_batch`: Creates a Spark batch.
+    *   `list_sessions`: Lists Spark sessions.
+    *   `get_session`: Gets a Spark session.
+    *   `get_session_template`: Gets a Spark session template.
 
 ## SingleStore
 
@@ -852,3 +894,25 @@ See [Usage Examples](../reference/cli.md#examples).
     *   `search_dicom_series`: Searches for DICOM series.
     *   `search_dicom_instances`: Searches for DICOM instances.
     *   `retrieve_rendered_dicom_instance`: Retrieves a rendered DICOM instance.
+
+## Oracle
+
+*   `--prebuilt` value: `oracledb`
+*   **Environment Variables:**
+   
+    *   `ORACLE_CONNECTION_STRING`: The connection string for the Oracle server (e.g., "hostname:port/servicename").
+    *   `ORACLE_USERNAME`: The database username.
+    *   `ORACLE_PASSWORD`: The password for the database user.
+    *   `ORACLE_WALLET`: The path to the Oracle DB Wallet file for databases that support this authentication type.
+    *   `ORACLE_USE_OCI`: A boolean flag (`true` or `false`) indicating whether to use the OCI-based driver. Setting to `true` is required for features like Oracle Wallet and requires the Oracle Instant Client libraries to be installed.
+*   **Permissions:**
+    *   Database-level permissions (e.g., `SELECT`, `INSERT`) are required to execute queries.
+    *   For queries on DBA views like `dba_data_files` and `dba_free_space`, access typically requires elevated database privileges (like `SELECT_CATALOG_ROLE` or direct grants) that a standard user may not have.
+*   **Tools:**
+    *   `execute_sql`: Executes a SQL query.
+    *   `list_tables`: Lists tables in the database.
+    *   `list_active_sessions`: Lists active database sessions.
+    *   `get_query_plan`: Generate a full execution plan for a single SQL statement.
+    *   `list_top_sql_by_resource`: Lists top SQL statements by resource usage.
+    *   `list_tablespace_usage`: Lists tablespace usage.
+    *   `list_invalid_objects`: Lists invalid objects.

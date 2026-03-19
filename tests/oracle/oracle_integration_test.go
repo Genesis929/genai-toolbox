@@ -3,9 +3,12 @@
 package oracle
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -21,8 +24,8 @@ var (
 	OracleSourceType = "oracle"
 	OracleToolType   = "oracle-sql"
 	OracleHost       = os.Getenv("ORACLE_HOST")
-	OracleUser       = os.Getenv("ORACLE_USER")
-	OraclePass       = os.Getenv("ORACLE_PASS")
+	OracleUser       = os.Getenv("ORACLE_USERNAME")
+	OraclePass       = os.Getenv("ORACLE_PASSWORD")
 	OracleServerName = os.Getenv("ORACLE_SERVER_NAME")
 	OracleConnStr    = fmt.Sprintf(
 		"%s:%s/%s", OracleHost, "1521", OracleServerName)
@@ -33,9 +36,9 @@ func getOracleVars(t *testing.T) map[string]any {
 	case OracleHost:
 		t.Fatal("'ORACLE_HOST not set")
 	case OracleUser:
-		t.Fatal("'ORACLE_USER' not set")
+		t.Fatal("'ORACLE_USERNAME' not set")
 	case OraclePass:
-		t.Fatal("'ORACLE_PASS' not set")
+		t.Fatal("'ORACLE_PASSWORD' not set")
 	case OracleServerName:
 		t.Fatal("'ORACLE_SERVER_NAME' not set")
 	}
@@ -103,6 +106,34 @@ func TestOracleSimpleToolEndpoints(t *testing.T) {
 	tmplSelectCombined, tmplSelectFilterCombined := tests.GetMySQLTmplToolStatement()
 	toolsFile = tests.AddTemplateParamConfig(t, toolsFile, OracleToolType, tmplSelectCombined, tmplSelectFilterCombined, "")
 
+	// Configure a DML tool to verify the 'readonly: false' logic.
+	updateStmt := fmt.Sprintf(`UPDATE %s SET "name" = :1 WHERE "id" = :2`, tableNameParam)
+
+	toolsMap, ok := toolsFile["tools"].(map[string]any)
+	if !ok {
+		t.Fatal("Configuration error: 'tools' key is missing or is not a map")
+	}
+
+	toolsMap["my-update-tool"] = map[string]any{
+		"type":        "oracle-sql",
+		"source":      "my-instance",
+		"statement":   updateStmt,
+		"readOnly":    false,
+		"description": "Update user name by ID.",
+		"parameters": []map[string]any{
+			{
+				"name":        "name",
+				"type":        "string",
+				"description": "The new name for the user.",
+			},
+			{
+				"name":        "id",
+				"type":        "integer",
+				"description": "The user ID to update.",
+			},
+		},
+	}
+
 	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile, args...)
 	if err != nil {
 		t.Fatalf("command initialization returned an error: %s", err)
@@ -119,7 +150,7 @@ func TestOracleSimpleToolEndpoints(t *testing.T) {
 
 	// Get configs for tests
 	select1Want := "[{\"1\":1}]"
-	mcpMyFailToolWant := `{"jsonrpc":"2.0","id":"invoke-fail-tool","result":{"content":[{"type":"text","text":"error processing request: unable to execute query: dpiStmt_execute: ORA-00900: invalid SQL statement"}],"isError":true}}`
+	mcpMyFailToolWant := `{"jsonrpc":"2.0","id":"invoke-fail-tool","result":{"content":[{"type":"text","text":"unable to execute query: dpiStmt_execute: ORA-00900: invalid SQL statement\nHelp: https://docs.oracle.com/error-help/db/ora-00900/"}],"isError":true}}`
 	createTableStatement := `"CREATE TABLE t (id NUMBER GENERATED AS IDENTITY PRIMARY KEY, name VARCHAR2(255))"`
 	mcpSelect1Want := `{"jsonrpc":"2.0","id":"invoke my-auth-required-tool","result":{"content":[{"type":"text","text":"{\"1\":1}"}]}}`
 
@@ -133,6 +164,11 @@ func TestOracleSimpleToolEndpoints(t *testing.T) {
 	tests.RunMCPToolCallMethod(t, mcpMyFailToolWant, mcpSelect1Want)
 	tests.RunExecuteSqlToolInvokeTest(t, createTableStatement, select1Want)
 	tests.RunToolInvokeWithTemplateParameters(t, tableNameTemplateParam)
+
+	// Invoke the 'my-update-tool' and verify the result.
+	testDmlQueries(t, "my-update-tool",
+		`{"name": "UpdatedAlice", "id": 1}`,
+		`\"rows_affected\":1`)
 }
 
 func setupOracleTable(t *testing.T, ctx context.Context, pool *sql.DB, createStatement, insertStatement, tableName string, params []any) func(*testing.T) {
@@ -240,5 +276,49 @@ func dropAllUserTables(t *testing.T, ctx context.Context, db *sql.DB) {
 		if err != nil {
 			t.Logf("failed to drop table %s: %v", tableName, err)
 		}
+	}
+}
+
+// testDmlQueries sends a JSON-RPC request to the running test server
+// and asserts that the response body contains the expected substring.
+func testDmlQueries(t *testing.T, toolName, paramsJSON, wantResponseSubStr string) {
+	t.Helper()
+
+	// The test server typically runs on port 8080
+	url := "http://localhost:5000/mcp"
+
+	// Construct the JSON-RPC request body
+	reqBody := fmt.Sprintf(`{
+		"jsonrpc": "2.0", 
+		"method": "tools/call", 
+		"params": {
+			"name": "%s", 
+			"arguments": %s
+		}, 
+		"id": 1
+	}`, toolName, paramsJSON)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(reqBody)))
+	if err != nil {
+		t.Fatalf("Failed to create HTTP request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("Failed to send request to %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("Failed to read response body: %v", err)
+	}
+
+	// Verify that the response contains the expected success message (e.g., "rows_affected")
+	if !strings.Contains(string(body), wantResponseSubStr) {
+		t.Errorf("Tool invocation '%s' failed.\nGot response: %s\nExpected substring: %s",
+			toolName, string(body), wantResponseSubStr)
 	}
 }
