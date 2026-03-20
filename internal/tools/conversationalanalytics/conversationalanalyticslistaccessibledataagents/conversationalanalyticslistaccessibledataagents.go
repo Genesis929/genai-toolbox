@@ -179,10 +179,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		if logger, lerr := util.LoggerFromContext(ctx); lerr == nil {
-			logger.ErrorContext(ctx, "conversational analytics API error", "status", resp.StatusCode, "body", string(body))
-		}
-		return nil, util.NewClientServerError(fmt.Sprintf("API returned non-200 status: %d", resp.StatusCode), resp.StatusCode, nil)
+		return nil, util.NewAgentError(fmt.Sprintf("API returned non-200 status: %d %s", resp.StatusCode, string(body)), nil)
 	}
 
 	var result any

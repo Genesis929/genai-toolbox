@@ -264,7 +264,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	response, err := getStream(caURL, payload, headers, source.GetMaxQueryResultRows())
 	if err != nil {
 		// getStream wraps network errors or non-200 responses
-		return nil, util.NewClientServerError("failed to get response from conversational analytics API", http.StatusInternalServerError, err)
+		return nil, util.NewAgentError("failed to get response from conversational analytics API", err)
 	}
 
 	return response, nil
