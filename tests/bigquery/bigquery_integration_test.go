@@ -1437,6 +1437,9 @@ func runBigQueryGetDataAgentInfoInvokeTest(t *testing.T, dataAgentName, dataAgen
 }
 
 func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
+	const maxRetries = 3
+	const requestTimeout = 340 * time.Second
+
 	idToken, err := tests.GetGoogleIdToken(tests.ClientId)
 	if err != nil {
 		t.Fatalf("error getting Google ID token: %s", err)
@@ -1448,13 +1451,13 @@ func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
 	}
 	accessToken = "Bearer " + accessToken
 
-	dataAgentWant := `(?s)Schema Resolved.*Retrieval Query.*SQL Generated.*Data Retrieved.*Answer`
+	dataAgentWant := `FINAL_RESPONSE`
 
 	invokeTcs := []struct {
 		name          string
 		api           string
 		requestHeader map[string]string
-		requestBody   io.Reader
+		requestBody   string
 		want          string
 		isErr         bool
 	}{
@@ -1462,7 +1465,7 @@ func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
 			name:          "invoke my-ask-data-agent-tool",
 			api:           "http://127.0.0.1:5000/api/tool/my-ask-data-agent-tool/invoke",
 			requestHeader: map[string]string{},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			requestBody:   fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID),
 			want:          dataAgentWant,
 			isErr:         false,
 		},
@@ -1470,7 +1473,7 @@ func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
 			name:          "invoke my-auth-ask-data-agent-tool with auth token",
 			api:           "http://127.0.0.1:5000/api/tool/my-auth-ask-data-agent-tool/invoke",
 			requestHeader: map[string]string{"my-google-auth_token": idToken},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			requestBody:   fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID),
 			want:          dataAgentWant,
 			isErr:         false,
 		},
@@ -1478,14 +1481,14 @@ func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
 			name:          "invoke my-auth-ask-data-agent-tool without auth token",
 			api:           "http://127.0.0.1:5000/api/tool/my-auth-ask-data-agent-tool/invoke",
 			requestHeader: map[string]string{},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			requestBody:   fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID),
 			isErr:         true,
 		},
 		{
 			name:          "invoke my-client-auth-ask-data-agent-tool with auth token",
 			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-ask-data-agent-tool/invoke",
 			requestHeader: map[string]string{"Authorization": accessToken},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			requestBody:   fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID),
 			want:          dataAgentWant,
 			isErr:         false,
 		},
@@ -1493,24 +1496,56 @@ func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
 			name:          "invoke my-client-auth-ask-data-agent-tool without auth token",
 			api:           "http://127.0.0.1:5000/api/tool/my-client-auth-ask-data-agent-tool/invoke",
 			requestHeader: map[string]string{},
-			requestBody:   bytes.NewBuffer([]byte(fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID))),
+			requestBody:   fmt.Sprintf(`{"user_query_with_context": "What are the names in the table?", "data_agent_id": "%s"}`, dataAgentID),
 			isErr:         true,
 		},
 	}
 
 	for _, tc := range invokeTcs {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodPost, tc.api, tc.requestBody)
+			var resp *http.Response
+			var err error
+			bodyBytes := []byte(tc.requestBody)
+
+			req, err := http.NewRequest(http.MethodPost, tc.api, nil)
 			if err != nil {
 				t.Fatalf("unable to create request: %s", err)
 			}
-			req.Header.Add("Content-type", "application/json")
+			req.Header.Set("Content-type", "application/json")
 			for k, v := range tc.requestHeader {
 				req.Header.Add(k, v)
 			}
-			resp, err := http.DefaultClient.Do(req)
+
+			for i := 0; i < maxRetries; i++ {
+				ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+				defer cancel()
+
+				req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				req.GetBody = func() (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+				}
+				reqWithCtx := req.WithContext(ctx)
+
+				resp, err = http.DefaultClient.Do(reqWithCtx)
+				if err != nil {
+					// Retry on time out.
+					if os.IsTimeout(err) {
+						t.Logf("Request timed out (attempt %d/%d), retrying...", i+1, maxRetries)
+						time.Sleep(5 * time.Second)
+						continue
+					}
+					t.Fatalf("unable to send request: %s", err)
+				}
+				if resp.StatusCode == http.StatusServiceUnavailable {
+					t.Logf("Received 503 Service Unavailable (attempt %d/%d), retrying...", i+1, maxRetries)
+					time.Sleep(15 * time.Second)
+					continue
+				}
+				break
+			}
+
 			if err != nil {
-				t.Fatalf("unable to send request: %s", err)
+				t.Fatalf("Request failed after %d retries: %v", maxRetries, err)
 			}
 			defer resp.Body.Close()
 
@@ -1522,14 +1557,10 @@ func runBigQueryAskDataAgentInvokeTest(t *testing.T, dataAgentID string) {
 				t.Fatalf("response status code is not 200, got %d: %s", resp.StatusCode, string(bodyBytes))
 			}
 
-			bodyBytes, err := io.ReadAll(resp.Body)
-			if err != nil {
-				t.Fatalf("error reading response body: %v", err)
-			}
-
 			var body map[string]interface{}
-			if err := json.Unmarshal(bodyBytes, &body); err != nil {
-				t.Fatalf("error parsing response body")
+			err = json.NewDecoder(resp.Body).Decode(&body)
+			if err != nil {
+				t.Fatalf("error parsing response body: %v", err)
 			}
 
 			got, ok := body["result"].(string)

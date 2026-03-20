@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	yaml "github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
@@ -219,7 +220,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	}
 
 	// Call the streaming API
-	response, err := getStream(ctx, caURL, payload, headers, maxQueryResultRows)
+	response, err := getStream(caURL, payload, headers, maxQueryResultRows)
 	if err != nil {
 		return nil, util.NewClientServerError("failed to get response from conversational analytics API", http.StatusInternalServerError, err)
 	}
@@ -259,85 +260,7 @@ func (t Tool) GetParameters() parameters.Parameters {
 	return t.Parameters
 }
 
-// StreamMessage represents a single message object from the streaming API response.
-type StreamMessage struct {
-	SystemMessage *SystemMessage `json:"systemMessage,omitempty"`
-	Error         *ErrorResponse `json:"error,omitempty"`
-}
-
-// SystemMessage contains different types of system-generated content.
-type SystemMessage struct {
-	Text   *TextResponse   `json:"text,omitempty"`
-	Schema *SchemaResponse `json:"schema,omitempty"`
-	Data   *DataResponse   `json:"data,omitempty"`
-}
-
-// TextResponse contains textual parts of a message.
-type TextResponse struct {
-	Parts []string `json:"parts"`
-}
-
-// SchemaResponse contains schema-related information.
-type SchemaResponse struct {
-	Query  *SchemaQuery  `json:"query,omitempty"`
-	Result *SchemaResult `json:"result,omitempty"`
-}
-
-// SchemaQuery holds the question that prompted a schema lookup.
-type SchemaQuery struct {
-	Question string `json:"question"`
-}
-
-// SchemaResult contains the datasources with their schemas.
-type SchemaResult struct {
-	Datasources []Datasource `json:"datasources"`
-}
-
-// Datasource represents a data source with its reference and schema.
-type Datasource struct {
-	BigQueryTableReference *BQTableReference `json:"bigqueryTableReference,omitempty"`
-	Schema                 *BQSchema         `json:"schema,omitempty"`
-}
-
-// BQSchema defines the structure of a BigQuery table.
-type BQSchema struct {
-	Fields []BQField `json:"fields"`
-}
-
-// BQField describes a single column in a BigQuery table.
-type BQField struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Mode        string `json:"mode"`
-}
-
-// DataResponse contains data-related information, like queries and results.
-type DataResponse struct {
-	Query        *DataQuery  `json:"query,omitempty"`
-	GeneratedSQL string      `json:"generatedSql,omitempty"`
-	Result       *DataResult `json:"result,omitempty"`
-}
-
-// DataQuery holds information about a data retrieval query.
-type DataQuery struct {
-	Name     string `json:"name"`
-	Question string `json:"question"`
-}
-
-// DataResult contains the schema and rows of a query result.
-type DataResult struct {
-	Schema BQSchema         `json:"schema"`
-	Data   []map[string]any `json:"data"`
-}
-
-// ErrorResponse represents an error message from the API.
-type ErrorResponse struct {
-	Code    float64 `json:"code"`
-	Message string  `json:"message"`
-}
-
-func getStream(ctx context.Context, url string, payload CAPayload, headers map[string]string, maxRows int) (string, error) {
+func getStream(url string, payload CAPayload, headers map[string]string, maxRows int) (string, error) {
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
@@ -351,7 +274,7 @@ func getStream(ctx context.Context, url string, payload CAPayload, headers map[s
 		req.Header.Set(k, v)
 	}
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 330 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to send request: %w", err)
@@ -360,14 +283,12 @@ func getStream(ctx context.Context, url string, payload CAPayload, headers map[s
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		if logger, lerr := util.LoggerFromContext(ctx); lerr == nil {
-			logger.ErrorContext(ctx, "conversational analytics API error", "status", resp.StatusCode, "body", string(body))
-		}
-		return "", fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
+		return "", fmt.Errorf("API returned non-200 status: %d %s", resp.StatusCode, string(body))
 	}
 
 	var messages []map[string]any
 	decoder := json.NewDecoder(resp.Body)
+	dataMsgIdx := -1
 
 	// The response is a JSON array, so we read the opening bracket.
 	if _, err := decoder.Token(); err != nil {
@@ -378,32 +299,45 @@ func getStream(ctx context.Context, url string, payload CAPayload, headers map[s
 	}
 
 	for decoder.More() {
-		var msg StreamMessage
-		if err := decoder.Decode(&msg); err != nil {
+		var rawMsg json.RawMessage
+		if err := decoder.Decode(&rawMsg); err != nil {
 			if err == io.EOF {
 				break
 			}
-			return "", fmt.Errorf("error decoding stream message: %w", err)
+			return "", fmt.Errorf("error decoding raw message: %w", err)
 		}
 
-		var newMessage map[string]any
-		if msg.SystemMessage != nil {
-			if msg.SystemMessage.Text != nil {
-				newMessage = handleTextResponse(msg.SystemMessage.Text)
-			} else if msg.SystemMessage.Schema != nil {
-				newMessage = handleSchemaResponse(msg.SystemMessage.Schema)
-			} else if msg.SystemMessage.Data != nil {
-				newMessage = handleDataResponse(msg.SystemMessage.Data, maxRows)
-			}
-		} else if msg.Error != nil {
-			newMessage = handleError(msg.Error)
+		var msg map[string]any
+		if err := json.Unmarshal(rawMsg, &msg); err != nil {
+			return "", fmt.Errorf("error unmarshaling raw message: %w", err)
 		}
-		messages = appendMessage(messages, newMessage)
+
+		var processedMsg map[string]any
+		if dataResult := extractDataResult(msg); dataResult != nil {
+			// 1. If it's a data result, format it.
+			processedMsg = formatDataRetrieved(dataResult, maxRows)
+			if dataMsgIdx >= 0 {
+				// Replace previous data with a placeholder. Intermediate data results in a
+				// stream are redundant and consume unnecessary tokens.
+				messages[dataMsgIdx] = map[string]any{"Data Retrieved": "Intermediate result omitted"}
+			}
+			dataMsgIdx = len(messages)
+		} else if sm, ok := msg["systemMessage"].(map[string]any); ok {
+			// 2. If it's a system message, unwrap it.
+			processedMsg = sm
+		} else {
+			// 3. Otherwise (e.g. error), pass it through raw.
+			processedMsg = msg
+		}
+
+		if processedMsg != nil {
+			messages = append(messages, processedMsg)
+		}
 	}
 
 	var acc strings.Builder
 	for i, msg := range messages {
-		jsonBytes, err := json.MarshalIndent(msg, "", "  ")
+		jsonBytes, err := json.Marshal(msg)
 		if err != nil {
 			return "", fmt.Errorf("error marshalling message: %w", err)
 		}
@@ -416,116 +350,73 @@ func getStream(ctx context.Context, url string, payload CAPayload, headers map[s
 	return acc.String(), nil
 }
 
-func formatBqTableRef(tableRef *BQTableReference) string {
-	return fmt.Sprintf("%s.%s.%s", tableRef.ProjectID, tableRef.DatasetID, tableRef.TableID)
+// extractDataResult attempts to find the result.data deep inside the generic map.
+func extractDataResult(msg map[string]any) map[string]any {
+	sm, ok := msg["systemMessage"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	data, ok := sm["data"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	result, ok := data["result"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	if _, hasData := result["data"].([]any); hasData {
+		return result
+	}
+	return nil
 }
 
-func formatSchemaAsDict(data *BQSchema) map[string]any {
-	headers := []string{"Column", "Type", "Description", "Mode"}
-	if data == nil {
-		return map[string]any{"headers": headers, "rows": []any{}}
+// formatDataRetrieved transforms the raw result map into the simplified Toolbox format.
+func formatDataRetrieved(result map[string]any, maxRows int) map[string]any {
+	rawData, _ := result["data"].([]any)
+
+	var fields []any
+	if schema, ok := result["schema"].(map[string]any); ok {
+		if f, ok := schema["fields"].([]any); ok {
+			fields = f
+		}
+	}
+
+	var headers []string
+	for _, f := range fields {
+		if fm, ok := f.(map[string]any); ok {
+			if name, ok := fm["name"].(string); ok {
+				headers = append(headers, name)
+			}
+		}
+	}
+
+	totalRows := len(rawData)
+	numToDisplay := totalRows
+	if numToDisplay > maxRows {
+		numToDisplay = maxRows
 	}
 
 	var rows [][]any
-	for _, field := range data.Fields {
-		rows = append(rows, []any{field.Name, field.Type, field.Description, field.Mode})
-	}
-	return map[string]any{"headers": headers, "rows": rows}
-}
-
-func formatDatasourceAsDict(datasource *Datasource) map[string]any {
-	var sourceName string
-	if datasource.BigQueryTableReference != nil {
-		sourceName = formatBqTableRef(datasource.BigQueryTableReference)
-	}
-
-	var schema map[string]any
-	if datasource.Schema != nil {
-		schema = formatSchemaAsDict(datasource.Schema)
-	}
-
-	return map[string]any{"source_name": sourceName, "schema": schema}
-}
-
-func handleTextResponse(resp *TextResponse) map[string]any {
-	return map[string]any{"Answer": strings.Join(resp.Parts, "")}
-}
-
-func handleSchemaResponse(resp *SchemaResponse) map[string]any {
-	if resp.Query != nil {
-		return map[string]any{"Question": resp.Query.Question}
-	}
-	if resp.Result != nil {
-		var formattedSources []map[string]any
-		for _, ds := range resp.Result.Datasources {
-			formattedSources = append(formattedSources, formatDatasourceAsDict(&ds))
-		}
-		return map[string]any{"Schema Resolved": formattedSources}
-	}
-	return nil
-}
-
-func handleDataResponse(resp *DataResponse, maxRows int) map[string]any {
-	if resp.Query != nil {
-		return map[string]any{
-			"Retrieval Query": map[string]any{
-				"Query Name": resp.Query.Name,
-				"Question":   resp.Query.Question,
-			},
-		}
-	}
-	if resp.GeneratedSQL != "" {
-		return map[string]any{"SQL Generated": resp.GeneratedSQL}
-	}
-	if resp.Result != nil {
-		var headers []string
-		for _, f := range resp.Result.Schema.Fields {
-			headers = append(headers, f.Name)
-		}
-
-		totalRows := len(resp.Result.Data)
-		var compactRows [][]any
-		numRowsToDisplay := totalRows
-		if numRowsToDisplay > maxRows {
-			numRowsToDisplay = maxRows
-		}
-
-		for _, rowVal := range resp.Result.Data[:numRowsToDisplay] {
-			var rowValues []any
-			for _, header := range headers {
-				rowValues = append(rowValues, rowVal[header])
+	for _, r := range rawData[:numToDisplay] {
+		if rm, ok := r.(map[string]any); ok {
+			var row []any
+			for _, h := range headers {
+				row = append(row, rm[h])
 			}
-			compactRows = append(compactRows, rowValues)
-		}
-
-		summary := fmt.Sprintf("Showing all %d rows.", totalRows)
-		if totalRows > maxRows {
-			summary = fmt.Sprintf("Showing the first %d of %d total rows.", numRowsToDisplay, totalRows)
-		}
-
-		return map[string]any{
-			"Data Retrieved": map[string]any{
-				"headers": headers,
-				"rows":    compactRows,
-				"summary": summary,
-			},
+			rows = append(rows, row)
 		}
 	}
-	return nil
-}
 
-func handleError(resp *ErrorResponse) map[string]any {
+	summary := fmt.Sprintf("Showing all %d rows.", totalRows)
+	if totalRows > maxRows {
+		summary = fmt.Sprintf("Showing the first %d of %d total rows.", numToDisplay, totalRows)
+	}
+
 	return map[string]any{
-		"Error": map[string]any{
-			"Code":    int(resp.Code),
-			"Message": resp.Message,
+		"Data Retrieved": map[string]any{
+			"headers": headers,
+			"rows":    rows,
+			"summary": summary,
 		},
 	}
-}
-
-func appendMessage(messages []map[string]any, newMessage map[string]any) []map[string]any {
-	if newMessage == nil {
-		return messages
-	}
-	return append(messages, newMessage)
 }
