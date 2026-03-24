@@ -38,7 +38,7 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 		{
 			desc: "basic example",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
@@ -56,7 +56,7 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 		{
 			desc: "all fields specified",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
@@ -70,14 +70,54 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 					Project:        "my-project",
 					Location:       "asia",
 					WriteMode:      "blocked",
-					UseClientOAuth: false,
+					UseClientOAuth: "",
 				},
 			},
 		},
 		{
 			desc: "use client auth example",
 			in: `
-			kind: sources
+			kind: source
+			name: my-instance
+			type: bigquery
+			project: my-project
+			location: us
+			useClientOAuth: "true"
+			`,
+			want: map[string]sources.SourceConfig{
+				"my-instance": bigquery.Config{
+					Name:           "my-instance",
+					Type:           bigquery.SourceType,
+					Project:        "my-project",
+					Location:       "us",
+					UseClientOAuth: "true",
+				},
+			},
+		},
+		{
+			desc: "with custom auth header name example",
+			in: `
+			kind: source
+			name: my-instance
+			type: bigquery
+			project: my-project
+			location: us
+			useClientOAuth: X-Custom-Auth
+			`,
+			want: map[string]sources.SourceConfig{
+				"my-instance": bigquery.Config{
+					Name:           "my-instance",
+					Type:           bigquery.SourceType,
+					Project:        "my-project",
+					Location:       "us",
+					UseClientOAuth: "X-Custom-Auth",
+				},
+			},
+		},
+		{
+			desc: "use client auth with unquoted true",
+			in: `
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
@@ -90,14 +130,34 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 					Type:           bigquery.SourceType,
 					Project:        "my-project",
 					Location:       "us",
-					UseClientOAuth: true,
+					UseClientOAuth: "true",
+				},
+			},
+		},
+		{
+			desc: "use client auth with unquoted false",
+			in: `
+			kind: source
+			name: my-instance
+			type: bigquery
+			project: my-project
+			location: us
+			useClientOAuth: false
+			`,
+			want: map[string]sources.SourceConfig{
+				"my-instance": bigquery.Config{
+					Name:           "my-instance",
+					Type:           bigquery.SourceType,
+					Project:        "my-project",
+					Location:       "us",
+					UseClientOAuth: "false",
 				},
 			},
 		},
 		{
 			desc: "with allowed datasets example",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
@@ -118,7 +178,7 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 		{
 			desc: "with service account impersonation example",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
@@ -138,7 +198,7 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 		{
 			desc: "with custom scopes example",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
@@ -160,7 +220,7 @@ func TestParseFromYamlBigQuery(t *testing.T) {
 		{
 			desc: "with max query result rows example",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
@@ -200,24 +260,24 @@ func TestFailParseFromYaml(t *testing.T) {
 		{
 			desc: "extra field",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			project: my-project
 			location: us
 			foo: bar
 			`,
-			err: "error unmarshaling sources: unable to parse source \"my-instance\" as \"bigquery\": [1:1] unknown field \"foo\"\n>  1 | foo: bar\n       ^\n   2 | location: us\n   3 | name: my-instance\n   4 | project: my-project\n   5 | ",
+			err: "error unmarshaling source: unable to parse source \"my-instance\" as \"bigquery\": [1:1] unknown field \"foo\"\n>  1 | foo: bar\n       ^\n   2 | location: us\n   3 | name: my-instance\n   4 | project: my-project\n   5 | ",
 		},
 		{
 			desc: "missing required field",
 			in: `
-			kind: sources
+			kind: source
 			name: my-instance
 			type: bigquery
 			location: us
 			`,
-			err: "error unmarshaling sources: unable to parse source \"my-instance\" as \"bigquery\": Key: 'Config.Project' Error:Field validation for 'Project' failed on the 'required' tag",
+			err: "error unmarshaling source: unable to parse source \"my-instance\" as \"bigquery\": Key: 'Config.Project' Error:Field validation for 'Project' failed on the 'required' tag",
 		},
 	}
 	for _, tc := range tcs {
@@ -253,7 +313,7 @@ func TestInitialize_MaxQueryResultRows(t *testing.T) {
 				Name:           "test-default",
 				Type:           bigquery.SourceType,
 				Project:        "test-project",
-				UseClientOAuth: true,
+				UseClientOAuth: "true",
 			},
 			want: 50,
 		},
@@ -263,7 +323,7 @@ func TestInitialize_MaxQueryResultRows(t *testing.T) {
 				Name:               "test-configured",
 				Type:               bigquery.SourceType,
 				Project:            "test-project",
-				UseClientOAuth:     true,
+				UseClientOAuth:     "true",
 				MaxQueryResultRows: 100,
 			},
 			want: 100,

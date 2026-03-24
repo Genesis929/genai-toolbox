@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/googleapis/genai-toolbox/internal/server/mcp/jsonrpc"
 	"github.com/googleapis/genai-toolbox/internal/sources"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -1024,6 +1026,44 @@ func RunMCPToolCallMethod(t *testing.T, myFailToolWant, select1Want string, opti
 			wantStatusCode: http.StatusUnauthorized,
 		},
 		{
+			name:    "MCP Invoke my-custom-client-auth-tool with custom access token",
+			enabled: configs.supportClientAuth,
+			api:     "http://127.0.0.1:5000/mcp",
+			// Note: This assumes my-custom-client-auth-tool is configured to use X-Custom-Auth
+			requestHeader: map[string]string{"X-Custom-Auth": accessToken},
+			requestBody: jsonrpc.JSONRPCRequest{
+				Jsonrpc: "2.0",
+				Id:      "invoke my-custom-client-auth-tool",
+				Request: jsonrpc.Request{
+					Method: "tools/call",
+				},
+				Params: map[string]any{
+					"name":      "my-custom-client-auth-tool",
+					"arguments": map[string]any{},
+				},
+			},
+			wantStatusCode: http.StatusOK,
+			wantBody:       "{\"jsonrpc\":\"2.0\",\"id\":\"invoke my-custom-client-auth-tool\",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"f0_\\\":1}\"}]}}",
+		},
+		{
+			name:          "MCP Invoke my-custom-client-auth-tool without access token",
+			enabled:       configs.supportClientAuth,
+			api:           "http://127.0.0.1:5000/mcp",
+			requestHeader: map[string]string{},
+			requestBody: jsonrpc.JSONRPCRequest{
+				Jsonrpc: "2.0",
+				Id:      "invoke my-custom-client-auth-tool",
+				Request: jsonrpc.Request{
+					Method: "tools/call",
+				},
+				Params: map[string]any{
+					"name":      "my-custom-client-auth-tool",
+					"arguments": map[string]any{},
+				},
+			},
+			wantStatusCode: http.StatusUnauthorized,
+		},
+		{
 			name:          "MCP Invoke my-fail-tool",
 			api:           "http://127.0.0.1:5000/mcp",
 			enabled:       true,
@@ -1714,6 +1754,12 @@ func RunPostgresListTriggersTest(t *testing.T, ctx context.Context, pool *pgxpoo
 
 func setupPostgresPublicationTable(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tableName string, pubName string) func(t *testing.T) {
 	t.Helper()
+	if _, err := pool.Exec(ctx, fmt.Sprintf("DROP PUBLICATION IF EXISTS %s;", pubName)); err != nil {
+		t.Errorf("unable to drop publication %s: %v", pubName, err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s;", tableName)); err != nil {
+		t.Errorf("unable to drop table %s: %v", tableName, err)
+	}
 	createTableStmt := fmt.Sprintf("CREATE TABLE %s (id SERIAL PRIMARY KEY, name TEXT);", tableName)
 	if _, err := pool.Exec(ctx, createTableStmt); err != nil {
 		t.Fatalf("unable to create table %s: %v", tableName, err)
@@ -3685,26 +3731,43 @@ func RunMSSQLListTablesTest(t *testing.T, tableNameParam, tableNameAuth string) 
 	}
 }
 
+func CreateAndLockPostgresTable(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tableName string) func() {
+	_, err := pool.Exec(ctx, fmt.Sprintf("CREATE TABLE IF NOT EXISTS %s (id INT PRIMARY KEY)", pgx.Identifier{tableName}.Sanitize()))
+	if err != nil {
+		t.Fatalf("unable to create table: %s", err)
+	}
+
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatalf("unable to create transaction: %s", err)
+	}
+	if _, err := tx.Exec(ctx, fmt.Sprintf("LOCK TABLE %s IN ACCESS EXCLUSIVE MODE", pgx.Identifier{tableName}.Sanitize())); err != nil {
+		t.Fatalf("unable to acquire lock: %s", err)
+	}
+
+	return func() {
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatalf("unable to rollback transaction: %s", err)
+		}
+		if _, err := pool.Exec(ctx, fmt.Sprintf("DROP TABLE IF EXISTS %s", pgx.Identifier{tableName}.Sanitize())); err != nil {
+			t.Fatalf("unable to drop table: %s", err)
+		}
+	}
+}
+
 // RunPostgresListLocksTest runs tests for the postgres list-locks tool
 func RunPostgresListLocksTest(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+
+	// Create and lock a test table
+	cleanup := CreateAndLockPostgresTable(t, ctx, pool, "test_postgres_list_locks_table")
+	defer cleanup()
+
 	type lockDetails struct {
-		Pid           any    `json:"pid"`
-		Usename       string `json:"usename"`
-		Database      string `json:"database"`
-		RelName       string `json:"relname"`
-		LockType      string `json:"locktype"`
-		Mode          string `json:"mode"`
-		Granted       bool   `json:"granted"`
-		FastPath      bool   `json:"fastpath"`
-		VirtualXid    any    `json:"virtualxid"`
-		TransactionId any    `json:"transactionid"`
-		ClassId       any    `json:"classid"`
-		ObjId         any    `json:"objid"`
-		ObjSubId      any    `json:"objsubid"`
-		PageNumber    any    `json:"page"`
-		TupleNumber   any    `json:"tuple"`
-		VirtualBlock  any    `json:"virtualblock"`
-		BlockNumber   any    `json:"blockno"`
+		Pid     any    `json:"pid"`
+		Usename string `json:"usename"`
+		Query   string `json:"query"`
+		TrxID   string `json:"trxid"`
+		Locks   string `json:"locks"`
 	}
 
 	invokeTcs := []struct {
@@ -3713,12 +3776,12 @@ func RunPostgresListLocksTest(t *testing.T, ctx context.Context, pool *pgxpool.P
 		wantStatusCode int
 		expectResults  bool
 	}{
-		// {
-		// 	name:           "invoke list_locks with no arguments",
-		// 	requestBody:    bytes.NewBuffer([]byte(`{}`)),
-		// 	wantStatusCode: http.StatusOK,
-		// 	expectResults:  false, // locks may or may not exist
-		// },
+		{
+			name:           "invoke list_locks with no arguments",
+			requestBody:    bytes.NewBuffer([]byte(`{}`)),
+			wantStatusCode: http.StatusOK,
+			expectResults:  true,
+		},
 	}
 	for _, tc := range invokeTcs {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3749,12 +3812,9 @@ func RunPostgresListLocksTest(t *testing.T, ctx context.Context, pool *pgxpool.P
 					t.Fatalf("failed to unmarshal result: %v, result string: %s", err, resultString)
 				}
 			}
-
-			// Verify that if results exist, they have the expected structure
-			for _, lock := range got {
-				if lock.LockType == "" {
-					t.Errorf("lock type should not be empty")
-				}
+			// Verify that we got results if expected
+			if tc.expectResults && len(got) == 0 {
+				t.Errorf("expected results but got none")
 			}
 		})
 	}
@@ -4417,8 +4477,45 @@ func RunPostgresListTableStatsTest(t *testing.T, ctx context.Context, pool *pgxp
 	}
 }
 
+// cleanupOldSchemas cleans up schemas that were created more than 1 hour ago
+func cleanupOldSchemas(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	rows, err := pool.Query(ctx, "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'test_proc_%'")
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+
+	oneHourAgo := time.Now().Add(-1 * time.Hour).Unix()
+
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+
+		parts := strings.Split(name, "_")
+		if len(parts) < 3 {
+			continue
+		}
+
+		timestamp, err := strconv.ParseInt(parts[2], 10, 64)
+		if err != nil {
+			continue
+		}
+
+		if timestamp < oneHourAgo {
+			_, err := pool.Exec(ctx, fmt.Sprintf("DROP SCHEMA IF EXISTS %s CASCADE", name))
+			if err == nil {
+				t.Logf("Cleaned up schema: %s", name)
+			}
+		}
+	}
+}
+
 // RunPostgresListStoredProcedureTest runs tests for the postgres list-stored-procedure tool
 func RunPostgresListStoredProcedureTest(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+	cleanupOldSchemas(t, ctx, pool)
+
 	type storedProcedureDetails struct {
 		SchemaName  string `json:"schema_name"`
 		Name        string `json:"name"`
@@ -4429,7 +4526,9 @@ func RunPostgresListStoredProcedureTest(t *testing.T, ctx context.Context, pool 
 	}
 
 	// Create test schema
-	testSchemaName := "test_proc_schema_" + strings.ReplaceAll(uuid.New().String(), "-", "")
+	// Use this format: test_proc_<timestamp>_<uuid>
+	now := time.Now().Unix()
+	testSchemaName := fmt.Sprintf("test_proc_%d_%s", now, strings.ReplaceAll(uuid.New().String(), "-", "")[:8])
 	createSchemaStmt := fmt.Sprintf("CREATE SCHEMA %s", testSchemaName)
 	if _, err := pool.Exec(ctx, createSchemaStmt); err != nil {
 		t.Fatalf("unable to create test schema: %v", err)
@@ -4636,7 +4735,7 @@ func RunPostgresListStoredProcedureTest(t *testing.T, ctx context.Context, pool 
 				}
 
 				// Verify definition contains CREATE PROCEDURE
-				if !strings.Contains(proc.Definition, "CREATE PROCEDURE") {
+				if !strings.Contains(strings.ToUpper(proc.Definition), "PROCEDURE") {
 					t.Logf("warning: definition may not be a valid CREATE PROCEDURE statement: %s", proc.Definition)
 				}
 
@@ -4693,4 +4792,27 @@ func RunRequest(t *testing.T, method, url string, body io.Reader, headers map[st
 
 	defer resp.Body.Close()
 	return resp, respBody
+}
+
+func RunStatementToolsTest(t *testing.T, tools map[string]string) {
+	for toolName, paramBody := range tools {
+		t.Run(toolName, func(t *testing.T) {
+			api := fmt.Sprintf("http://127.0.0.1:5000/api/tool/%s/invoke", toolName)
+			req, err := http.NewRequest(http.MethodPost, api, bytes.NewBufferString(paramBody))
+			if err != nil {
+				t.Fatalf("unable to create request: %s", err)
+			}
+			req.Header.Add("Content-type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("unable to send request: %s", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Fatalf("response status code is not 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+		})
+	}
 }

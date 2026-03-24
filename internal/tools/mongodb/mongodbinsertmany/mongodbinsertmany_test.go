@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/googleapis/genai-toolbox/internal/tools"
 	"github.com/googleapis/genai-toolbox/internal/tools/mongodb/mongodbinsertmany"
 
 	"github.com/google/go-cmp/cmp"
@@ -38,7 +39,7 @@ func TestParseFromYamlMongoQuery(t *testing.T) {
 		{
 			desc: "basic example",
 			in: `
-            kind: tools
+            kind: tool
             name: example_tool
             type: mongodb-insert-many
             source: my-instance
@@ -62,7 +63,7 @@ func TestParseFromYamlMongoQuery(t *testing.T) {
 		{
 			desc: "true canonical",
 			in: `
-            kind: tools
+            kind: tool
             name: example_tool
             type: mongodb-insert-many
             source: my-instance
@@ -87,7 +88,7 @@ func TestParseFromYamlMongoQuery(t *testing.T) {
 		{
 			desc: "false canonical",
 			in: `
-            kind: tools
+            kind: tool
             name: example_tool
             type: mongodb-insert-many
             source: my-instance
@@ -124,6 +125,32 @@ func TestParseFromYamlMongoQuery(t *testing.T) {
 
 }
 
+func TestAnnotations(t *testing.T) {
+	// Test default annotations for destructive tool
+	t.Run("default annotations", func(t *testing.T) {
+		annotations := tools.GetAnnotationsOrDefault(nil, tools.NewDestructiveAnnotations)
+		if annotations == nil {
+			t.Fatal("expected non-nil annotations")
+		}
+		if annotations.DestructiveHint == nil || *annotations.DestructiveHint != true {
+			t.Error("expected destructiveHint to be true")
+		}
+		if annotations.ReadOnlyHint == nil || *annotations.ReadOnlyHint != false {
+			t.Error("expected readOnlyHint to be false")
+		}
+	})
+
+	// Test custom annotations override default
+	t.Run("custom annotations", func(t *testing.T) {
+		customDestructive := false
+		custom := &tools.ToolAnnotations{DestructiveHint: &customDestructive}
+		annotations := tools.GetAnnotationsOrDefault(custom, tools.NewDestructiveAnnotations)
+		if annotations.DestructiveHint == nil || *annotations.DestructiveHint != false {
+			t.Error("expected custom destructiveHint to be false")
+		}
+	})
+}
+
 func TestFailParseFromYamlMongoQuery(t *testing.T) {
 	ctx, err := testutils.ContextWithNewLogger()
 	if err != nil {
@@ -137,7 +164,7 @@ func TestFailParseFromYamlMongoQuery(t *testing.T) {
 		{
 			desc: "Invalid method",
 			in: `
-            kind: tools
+            kind: tool
             name: example_tool
             type: mongodb-insert-many
             source: my-instance
