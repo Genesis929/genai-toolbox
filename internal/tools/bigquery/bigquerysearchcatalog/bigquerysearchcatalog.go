@@ -50,7 +50,7 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 
 type compatibleSource interface {
 	MakeDataplexCatalogClient() func() (*dataplexapi.CatalogClient, bigqueryds.DataplexClientCreator, error)
-	GoogleCloudProject() string
+	BigQueryProject() string
 	UseClientAuthorization() bool
 	GetAuthTokenHeaderName() string
 }
@@ -219,7 +219,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 
 	req := &dataplexpb.SearchEntriesRequest{
 		Query:          fmt.Sprintf("%s %s", prompt, constructSearchQuery(projectIds, datasetIds, types)),
-		Name:           fmt.Sprintf("projects/%s/locations/global", source.GoogleCloudProject()),
+		Name:           fmt.Sprintf("projects/%s/locations/global", source.BigQueryProject()),
 		PageSize:       pageSize,
 		SemanticSearch: true,
 	}
@@ -239,7 +239,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 
 	it := catalogClient.SearchEntries(ctx, req)
 	if it == nil {
-		return nil, util.NewClientServerError(fmt.Sprintf("failed to create search entries iterator for project %q", source.GoogleCloudProject()), http.StatusInternalServerError, nil)
+		return nil, util.NewClientServerError(fmt.Sprintf("failed to create search entries iterator for project %q", source.BigQueryProject()), http.StatusInternalServerError, nil)
 	}
 
 	var results []Response

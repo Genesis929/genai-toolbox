@@ -195,17 +195,15 @@ See [Usage Examples](../../../reference/cli.md#usage-examples).
     *   `list_table_ids`: Lists tables.
     *   `search_catalog`: Search for entries based on the provided query.
 
-## BigQuery Conversational Analytics with Data Agent
+## Conversational Analytics with Data Agent
 
-*   `--prebuilt` value: `bigquery-conversational-analytics-with-data-agent`
+*   `--prebuilt` value: `conversational-analytics-with-data-agent`
 *   **Environment Variables:**
-    *   `BIGQUERY_PROJECT`: The GCP project ID.
-    *   `BIGQUERY_LOCATION`: (Optional) The location of the data agent (e.g., `us` or `eu`). Defaults to `global`.
-    *   `BIGQUERY_USE_CLIENT_OAUTH`: (Optional) If `true`, forwards the client's
+    *   `CLOUD_GDA_PROJECT`: The GCP project ID.
+    *   `CLOUD_GDA_LOCATION`: (Optional) The location of the data agent (e.g., `us` or `eu`). Defaults to `global`.
+    *   `CLOUD_GDA_USE_CLIENT_OAUTH`: (Optional) If `true`, forwards the client's
         OAuth access token for authentication. Defaults to `false`.
-    *   `BIGQUERY_SCOPES`: (Optional) A comma-separated list of OAuth scopes to
-        use for authentication.
-    *   `BIGQUERY_MAX_QUERY_RESULT_ROWS`: (Optional) The maximum number of rows
+    *   `CLOUD_GDA_MAX_RESULTS`: (Optional) The maximum number of rows
         to return. Defaults to `50`.
 *   **Permissions:**
     *   **Gemini Data Analytics Stateless Chat User (Beta)** (`roles/geminidataanalytics.dataAgentStatelessUser`) to interact with the data agent.
@@ -213,7 +211,7 @@ See [Usage Examples](../../../reference/cli.md#usage-examples).
 *   **Tools:**
     *   `ask_data_agent`: Use this tool to perform natural language data analysis,
         get insights, or answer complex questions using pre-configured data
-        sources via a specific BigQuery Data Agent. For more information on
+        sources via a specific Data Agent. For more information on
         required roles, API setup, and IAM configuration, see the setup and
         authentication section of the [Conversational Analytics API
         documentation](https://cloud.google.com/gemini/docs/conversational-analytics-api/overview).

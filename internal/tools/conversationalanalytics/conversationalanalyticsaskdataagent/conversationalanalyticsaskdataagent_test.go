@@ -36,7 +36,7 @@ func TestParseFromYamlConversationalAnalyticsAskDataAgent(t *testing.T) {
 		{
 			desc: "basic example",
 			in: `
-            kind: tools
+            kind: tool
             name: example_tool
             type: conversational-analytics-ask-data-agent
             source: my-instance

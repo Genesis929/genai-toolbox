@@ -36,7 +36,7 @@ func TestParseFromYamlConversationalAnalyticsListDataAgents(t *testing.T) {
 		{
 			desc: "basic example",
 			in: `
-            kind: tools
+            kind: tool
             name: example_tool
             type: conversational-analytics-list-accessible-data-agents
             source: my-instance
@@ -55,7 +55,7 @@ func TestParseFromYamlConversationalAnalyticsListDataAgents(t *testing.T) {
 		{
 			desc: "with auth required",
 			in: `
-            kind: tools
+            kind: tool
             name: example_tool
             type: conversational-analytics-list-accessible-data-agents
             source: my-instance

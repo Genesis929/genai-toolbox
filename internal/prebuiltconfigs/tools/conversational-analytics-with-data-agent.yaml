@@ -13,35 +13,36 @@
 # limitations under the License.
 
 sources:
-  bigquery-source:
-    kind: "bigquery"
-    project: ${BIGQUERY_PROJECT}
-    location: ${BIGQUERY_LOCATION:}
-    useClientOAuth: ${BIGQUERY_USE_CLIENT_OAUTH:false}
-    scopes: ${BIGQUERY_SCOPES:}
-    maxQueryResultRows: ${BIGQUERY_MAX_QUERY_RESULT_ROWS:50}
+  conversational-analytics-source:
+    kind: "cloud-gemini-data-analytics"
+    projectId: ${CLOUD_GDA_PROJECT}
+    useClientOAuth: ${CLOUD_GDA_USE_CLIENT_OAUTH:false}
 
 tools:
   list-accessible-data-agents:
     kind: conversational-analytics-list-accessible-data-agents
-    source: bigquery-source
+    source: conversational-analytics-source
+    location: ${CLOUD_GDA_LOCATION:global}
     description: |
-      List all available BigQuery Data Agents that can be used for
+      List all available Data Agents that can be used for
       conversational analytics in the current project.
 
   get-data-agent-info:
     kind: conversational-analytics-get-data-agent-info
-    source: bigquery-source
+    source: conversational-analytics-source
+    location: ${CLOUD_GDA_LOCATION:global}
     description: |
-      Retrieve detailed information about a specific BigQuery Data Agent
+      Retrieve detailed information about a specific Data Agent
       using its ID.
 
   ask-data-agent:
     kind: conversational-analytics-ask-data-agent
-    source: bigquery-source
+    source: conversational-analytics-source
+    location: ${CLOUD_GDA_LOCATION:global}
+    maxResults: ${CLOUD_GDA_MAX_RESULTS:50}
     description: |
       Perform natural language data analysis and get insights by interacting
-      with a specific BigQuery Data Agent. This tool allows for conversational
+      with a specific Data Agent. This tool allows for conversational
       queries and provides detailed responses based on the agent's configured
       data sources.
 

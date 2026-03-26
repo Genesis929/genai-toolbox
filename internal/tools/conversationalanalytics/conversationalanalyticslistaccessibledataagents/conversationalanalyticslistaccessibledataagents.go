@@ -24,7 +24,7 @@ import (
 	yaml "github.com/goccy/go-yaml"
 	"github.com/googleapis/genai-toolbox/internal/embeddingmodels"
 	"github.com/googleapis/genai-toolbox/internal/sources"
-	bigqueryds "github.com/googleapis/genai-toolbox/internal/sources/bigquery"
+	cloudgdads "github.com/googleapis/genai-toolbox/internal/sources/cloudgda"
 	"github.com/googleapis/genai-toolbox/internal/tools"
 	"github.com/googleapis/genai-toolbox/internal/util"
 	"github.com/googleapis/genai-toolbox/internal/util/parameters"
@@ -49,21 +49,21 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 
 type compatibleSource interface {
 	GoogleCloudTokenSourceWithScope(ctx context.Context, scope string) (oauth2.TokenSource, error)
-	GoogleCloudProject() string
-	GoogleCloudLocation() string
+	GetProjectID() string
 	UseClientAuthorization() bool
 }
 
 // validate compatible sources are still compatible
-var _ compatibleSource = &bigqueryds.Source{}
+var _ compatibleSource = &cloudgdads.Source{}
 
-var compatibleSources = [...]string{bigqueryds.SourceType}
+var compatibleSources = [...]string{cloudgdads.SourceType}
 
 type Config struct {
 	Name         string   `yaml:"name" validate:"required"`
 	Type         string   `yaml:"type" validate:"required"`
 	Source       string   `yaml:"source" validate:"required"`
 	Description  string   `yaml:"description" validate:"required"`
+	Location     string   `yaml:"location"`
 	AuthRequired []string `yaml:"authRequired"`
 }
 
@@ -82,14 +82,13 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 	}
 
 	// verify the source is compatible
-	s, ok := rawS.(compatibleSource)
+	_, ok = rawS.(compatibleSource)
 	if !ok {
 		return nil, fmt.Errorf("invalid source for %q tool: source kind must be one of %q", resourceType, compatibleSources)
 	}
 
-	location := s.GoogleCloudLocation()
-	if location != "global" {
-		return nil, fmt.Errorf("source %q has location %q, but %q tool only supports 'global' location", cfg.Source, location, resourceType)
+	if cfg.Location == "" {
+		cfg.Location = "global"
 	}
 
 	params := parameters.Parameters{}
@@ -156,12 +155,8 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	}
 
 	// Construct URL
-	projectID := source.GoogleCloudProject()
-	location := source.GoogleCloudLocation()
-	if location == "" {
-		location = "us"
-	}
-	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents", projectID, location)
+	projectID := source.GetProjectID()
+	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents", projectID, t.Location)
 
 	req, err := http.NewRequest("GET", caURL, nil)
 	if err != nil {

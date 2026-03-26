@@ -29,7 +29,7 @@ for instructions.
 
 It's compatible with the following sources:
 
-- conversational-analytics
+- cloud-gemini-data-analytics
 
 `conversational-analytics-ask-data-agent` accepts the following parameters:
 
@@ -44,6 +44,8 @@ tools:
   ask_data_agent:
     kind: conversational-analytics-ask-data-agent
     source: my-conversational-analytics-source
+    location: global
+    maxResults: 50
     description: |
       Perform natural language data analysis and get insights by interacting 
       with a specific BigQuery Data Agent. This tool allows for conversational 
@@ -58,3 +60,5 @@ tools:
 | kind        |  string  |     true     | Must be "conversational-analytics-ask-data-agent". |
 | source      |  string  |     true     | Name of the source for chat.                       |
 | description |  string  |     true     | Description of the tool that is passed to the LLM. |
+| location    |  string  |    false     | The Google Cloud location (default: "global").     |
+| maxResults  |  integer |    false     | The maximum number of data rows to return in the tool's final response (default: 50). This only limits the amount of data included in the final tool return to prevent excessive token consumption, and does not affect the internal analytical process or intermediate steps. |

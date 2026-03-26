@@ -48,7 +48,7 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 }
 
 type compatibleSource interface {
-	GoogleCloudProject() string
+	BigQueryProject() string
 	UseClientAuthorization() bool
 	GetAuthTokenHeaderName() string
 	BigQueryAllowedDatasets() []string
@@ -93,7 +93,7 @@ func (cfg Config) Initialize(srcs map[string]sources.Source) (tools.Tool, error)
 		projectParameterDescription = "The Google Cloud project to list dataset ids."
 	}
 
-	projectParameter = parameters.NewStringParameterWithDefault(projectKey, s.GoogleCloudProject(), projectParameterDescription)
+	projectParameter = parameters.NewStringParameterWithDefault(projectKey, s.BigQueryProject(), projectParameterDescription)
 
 	params := parameters.Parameters{projectParameter}
 

@@ -59,9 +59,9 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 
 type compatibleSource interface {
 	BigQueryClient() *bigqueryapi.Client
-	GoogleCloudTokenSourceWithScope(ctx context.Context, scope string) (oauth2.TokenSource, error)
-	GoogleCloudProject() string
-	GoogleCloudLocation() string
+	BigQueryTokenSourceWithScope(ctx context.Context, scopes []string) (oauth2.TokenSource, error)
+	BigQueryProject() string
+	BigQueryLocation() string
 	GetMaxQueryResultRows() int
 	UseClientAuthorization() bool
 	GetAuthTokenHeaderName() string
@@ -196,7 +196,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 		}
 	} else {
 		// Get a token source for the Gemini Data Analytics API.
-		tokenSource, err := source.GoogleCloudTokenSourceWithScope(ctx, "")
+		tokenSource, err := source.BigQueryTokenSourceWithScope(ctx, nil)
 		if err != nil {
 			return nil, util.NewClientServerError("failed to get token source", http.StatusInternalServerError, err)
 		}
@@ -235,8 +235,8 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	}
 
 	// Construct URL, headers, and payload
-	projectID := source.GoogleCloudProject()
-	location := source.GoogleCloudLocation()
+	projectID := source.BigQueryProject()
+	location := source.BigQueryLocation()
 	if location == "" {
 		location = "us"
 	}
@@ -264,7 +264,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 	response, err := getStream(caURL, payload, headers, source.GetMaxQueryResultRows())
 	if err != nil {
 		// getStream wraps network errors or non-200 responses
-		return nil, util.NewAgentError("failed to get response from conversational analytics API", err)
+		return nil, util.NewClientServerError("failed to get response from conversational analytics API", http.StatusInternalServerError, err)
 	}
 
 	return response, nil

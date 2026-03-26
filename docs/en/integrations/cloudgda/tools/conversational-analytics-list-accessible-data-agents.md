@@ -15,7 +15,7 @@ data agents that are accessible.
 
 It's compatible with the following sources:
 
-- conversational-analytics
+- cloud-gemini-data-analytics
 
 `conversational-analytics-list-accessible-data-agents` does not accept any parameters.
 
@@ -26,6 +26,7 @@ tools:
   list_agents:
     kind: conversational-analytics-list-accessible-data-agents
     source: my-conversational-analytics-source
+    location: global
     description: |
       Use this tool to list available data agents.
 ```
@@ -37,3 +38,4 @@ tools:
 | kind        |  string  |     true     | Must be "conversational-analytics-list-accessible-data-agents". |
 | source      |  string  |     true     | Name of the source.                                |
 | description |  string  |     true     | Description of the tool that is passed to the LLM. |
+| location    |  string  |    false     | The Google Cloud location (default: "global").     |

@@ -15,11 +15,11 @@ details about a specific data agent.
 
 It's compatible with the following sources:
 
-- conversational-analytics
+- cloud-gemini-data-analytics
 
 `conversational-analytics-get-data-agent-info` accepts the following parameters:
 
-- **`name`:** The ID of the data agent to retrieve information for.
+- **`data_agent_id`:** The ID of the data agent to retrieve information for.
 
 ## Example
 
@@ -28,6 +28,7 @@ tools:
   get_agent_info:
     kind: conversational-analytics-get-data-agent-info
     source: my-conversational-analytics-source
+    location: global
     description: |
       Use this tool to get details about a specific data agent.
 ```
@@ -39,3 +40,4 @@ tools:
 | kind        |  string  |     true     | Must be "conversational-analytics-get-data-agent-info". |
 | source      |  string  |     true     | Name of the source.                                |
 | description |  string  |     true     | Description of the tool that is passed to the LLM. |
+| location    |  string  |    false     | The Google Cloud location (default: "global").     |
