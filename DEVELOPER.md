@@ -44,6 +44,42 @@ Before you begin, ensure you have the following:
     curl http://127.0.0.1:5000
     ```
 
+#### Cross Compiling For Windows
+
+Most developers work in a Unix or Unix-like environment.
+
+Compiling for Windows requires the download of zig to provide a C and C++
+compiler. These instructions are for cross compiling from Linux x86 but
+should work for macOS with small changes.
+
+1. Download zig for your platform.
+    ```bash
+    cd $HOME
+    curl -fL "https://ziglang.org/download/0.15.2/zig-x86_64-linux-0.15.2.tar.xz" -o zig.tar.xz
+    tar xf zig.tar.xz
+    ```
+    This will create the directory $HOME/zig-x86_64-linux-0.15.2. You only need to do this once.
+
+    If you are on macOS curl from https://ziglang.org/download/0.15.2/zig-x86_64-macos-0.15.2.tar.xz
+    or https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz.
+
+2. Change to your MCP Toolbox directory and run the following:
+    ```bash
+    cd $HOME/genai-toolbox
+    GOOS=windows \
+    GOARCH=amd64 \
+    CGO_ENABLED=1 \
+    CC="$HOME/zig-x86_64-linux-0.15.2/zig cc -target x86_64-windows-gnu"  \
+    CXX="$HOME/zig-x86_64-linux-0.15.2/zig c++ -target x86_64-windows-gnu" \
+    go build -o toolbox.exe
+    ```
+
+    If you are on macOS alter the path `zig-x86_64-linux-0.15.2` to the proper path
+    for your zig installation.
+
+Now the toolbox.exe file is ready to use. Transfer it to your windows machine and test it.
+
+
 ### Tool Naming Conventions
 
 This section details the purpose and conventions for MCP Toolbox's tools naming
@@ -267,11 +303,13 @@ When updating documentation, you must adhere to the structural constraints enfor
   * If a new database inherits tools from a base integration (like Cloud SQL inheriting Postgres tools), create the `tools/` directory with an `_index.md` file.
   * Map the inherited tools dynamically by adding the `shared_tools` YAML array to the frontmatter of this `tools/_index.md` file. **This file must strictly contain only frontmatter.**
 * **Adding Samples:**
-  * Samples are distributed across the site and aggregated visually via the "Samples Hub". Place your sample based on its scope:
-    1. **Quickstarts:** Place in `docs/en/documentation/getting-started/quickstart/`.
-    2. **Database-Specific samples:** Place in `docs/en/integrations/<newdb>/samples/`. Make sure to include a `samples/_index.md` wrapper that contains **only frontmatter**.
-    3. **General/Cross- samples:** Place directly in `docs/en/samples/`.
-  * Ensure appropriate **frontmatter tags (`sample_filters`, `is_sample`)** are added so the UI Gallery filters can index them.
+  * **Physical Location:**
+    1. **Quickstarts:** `docs/en/documentation/getting-started/quickstart/`.
+    2. **Integration-Specific:** `docs/en/integrations/<db>/samples/`. Must include an `_index.md` with strictly only frontmatter.
+    3. **General:** `docs/en/samples/`.
+  * **Frontmatter Requirements (Maintenance):** To ensure samples appear correctly in the Samples Section, you must provide the following tags:
+    * `is_sample: true` - Required for indexing.
+    * `sample_filters:` - A YAML array used for UI filtering (e.g., `[postgres, go, sql]`).
 * **Adding Top-Level Sections:** If you add a completely new top-level documentation directory (e.g., a new section alongside `integrations`, `documentation`), you **must** update the AI documentation layout files located at `.hugo/layouts/index.llms.txt` and `.hugo/layouts/index.llms-full.txt`. Specifically, update the "Diátaxis Narrative Framework" preamble so AI models understand the purpose of your new section.
 
 #### Adding Prebuilt Tools
@@ -380,6 +418,7 @@ go test -race -v ./cmd/... ./internal/...
   workflows on your PR.
   * Maintainers can comment `/gcbrun` to execute the integration tests.
   * Maintainers can add the label `tests:run` to execute the unit tests.
+  * Maintainers can add the label `docs: deploy-preview` to run the PR Preview workflow.
 
 #### Test Resources
 
@@ -498,6 +537,14 @@ When adding or updating a Tool page, your markdown file must strictly adhere to 
       * **Allowed Optional Headings:** `Compatible Sources`, `Requirements`, `Parameters`, `Output Format`, `Reference`, `Advanced Usage`, `Troubleshooting`, `Additional Resources`
   * **Compatible Sources Shortcode:** If you include the `## Compatible Sources` heading, you must place the compatible-sources shortcode (e.g., `{{< compatible-sources >}}`) directly beneath it.
 
+#### Prebuilt Configuration Structure (`integrations/**/prebuilt-configs/*.md`)
+
+To ensure new prebuilt configurations are automatically indexed by the `{{< list-prebuilt-configs >}}` shortcode on the main Prebuilt Configs page, follow these rules:
+
+* **Location:** Always place documentation for prebuilt configurations in a nested directory named `prebuilt-configs/` inside the database folder (e.g., `docs/en/integrations/alloydb/prebuilt-configs/`).
+* **Index Wrapper:** Every `prebuilt-configs/` directory must contain an `_index.md` file. This file acts as the anchor for the directory and must contain the `title` and `description` used in the automated lists.
+* **Architecture-Based Mapping:** Map configurations to database folders based on the `kind` defined in the tool's YAML file (in `internal/prebuiltconfigs/tools/`). For example, any tool using the `postgres` kind should live in the `postgres/` integration directory.
+
 #### Frontend Assets & Layouts
 
 If you need to modify the visual appearance, navigation, or behavior of the documentation website itself, all frontend assets are isolated within the `.hugo/` directory.
@@ -547,7 +594,7 @@ The documentation uses a dynamic versioning system that outputs standard HTML si
 
 **Search Indexing:** All deployment workflows automatically execute `npx pagefind --site public` to generate a version-scoped search index specific to that deployment's base URL.
 
-There are 6 GHA workflows we use to achieve document versioning (each deployment scenario has one workflow for GitHub Pages and one for Cloudflare Pages):
+There are 3 GHA workflows we use to achieve document versioning:
 
 1.  **Deploy In-development docs:**
     This workflow is run on every commit merged into the main branch. It deploys
@@ -557,7 +604,7 @@ There are 6 GHA workflows we use to achieve document versioning (each deployment
 1. **Deploy Versioned Docs:**
     When a new GitHub Release is published, it performs two deployments based on
     the new release tag. One to the new version subdirectory and one to the root
-    directory of the versioned-gh-pages branch.
+    directory of the cloudflare-pages branch.
 
     **Note:** Before the release PR from release-please is merged, add the
     newest version into the hugo.toml file.
@@ -568,7 +615,7 @@ There are 6 GHA workflows we use to achieve document versioning (each deployment
     were released before this new system was in place. This workflow can be
     started on the UI by providing the git version tag which you want to create
     the documentation for. The specific versioned subdirectory and the root docs
-    are updated on the versioned-gh-pages branch.
+    are updated on the cloudflare-pages branch.
 
 #### Contributors
 
