@@ -156,7 +156,7 @@ func (t Tool) Invoke(ctx context.Context, resourceMgr tools.SourceProvider, para
 
 	// Construct URL
 	projectID := source.GetProjectID()
-	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents", projectID, t.Location)
+	caURL := fmt.Sprintf("https://geminidataanalytics.googleapis.com/v1beta/projects/%s/locations/%s/dataAgents:listAccessible", projectID, t.Location)
 
 	req, err := http.NewRequest("GET", caURL, nil)
 	if err != nil {
