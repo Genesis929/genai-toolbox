@@ -143,7 +143,7 @@ func TestCloudGdaToolEndpoints(t *testing.T) {
 		return origFunc(ctx, opts...)
 	}
 
-	args := []string{"--enable-api"}
+	args := []string{"--enable-api", "--enable-native-api"}
 	toolsFile := getCloudGdaToolsConfig()
 	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile, args...)
 	if err != nil {
@@ -536,7 +536,8 @@ func TestCloudGDAConservationalAnalyticsTools(t *testing.T) {
 		},
 	}
 
-	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile)
+	args := []string{"--enable-api", "--enable-native-api"}
+	cmd, cleanup, err := tests.StartCmd(ctx, toolsFile, args...)
 	if err != nil {
 		t.Fatalf("command initialization returned an error: %s", err)
 	}
