@@ -170,21 +170,24 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 		return nil, util.NewClientServerError("failed to retrieve BigQuery client", http.StatusInternalServerError, err)
 	}
 
+	session, err := source.BigQuerySession()(ctx)
+	if err != nil {
+		return nil, util.NewClientServerError("failed to get BigQuery session", http.StatusInternalServerError, err)
+	}
+	var connProps []*bigqueryapi.ConnectionProperty
+	if session != nil {
+		connProps = []*bigqueryapi.ConnectionProperty{
+			{Key: "session_id", Value: session.ID},
+		}
+	}
+
 	var historyDataSource string
 	trimmedUpperHistoryData := strings.TrimSpace(strings.ToUpper(historyData))
 	if strings.HasPrefix(trimmedUpperHistoryData, "SELECT") || strings.HasPrefix(trimmedUpperHistoryData, "WITH") {
+		// When history_data is a query, we perform a dry run on history_data first to validate
+		// that it is a SELECT statement and provide clear error messages before embedding it
+		// in the AI.FORECAST query (which is also validated via dry run below).
 		if len(source.BigQueryAllowedDatasets()) > 0 {
-			var connProps []*bigqueryapi.ConnectionProperty
-			session, err := source.BigQuerySession()(ctx)
-			if err != nil {
-				return nil, util.NewClientServerError("failed to get BigQuery session", http.StatusInternalServerError, err)
-			}
-			if session != nil {
-				connProps = []*bigqueryapi.ConnectionProperty{
-					{Key: "session_id", Value: session.ID},
-				}
-			}
-
 			dryRunJob, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, historyData, nil, connProps, source, source.GetMaximumBytesBilled(), false)
 			if validationErr != nil {
 				return nil, validationErr
@@ -232,18 +235,6 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
             timestamp_col => %s,
             horizon => %d%s)`,
 		historyDataSource, dataCol, timestampCol, horizon, idColsArg)
-
-	session, err := source.BigQuerySession()(ctx)
-	if err != nil {
-		return nil, util.NewClientServerError("failed to get BigQuery session", http.StatusInternalServerError, err)
-	}
-	var connProps []*bigqueryapi.ConnectionProperty
-	if session != nil {
-		// Add session ID to the connection properties for subsequent calls.
-		connProps = []*bigqueryapi.ConnectionProperty{
-			{Key: "session_id", Value: session.ID},
-		}
-	}
 
 	if len(source.BigQueryAllowedDatasets()) > 0 {
 		_, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, sql, nil, connProps, source, source.GetMaximumBytesBilled(), false)

@@ -186,29 +186,9 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 
 	var inputDataSource string
 	trimmedUpperInputData := strings.TrimSpace(strings.ToUpper(inputData))
-	if strings.HasPrefix(trimmedUpperInputData, "SELECT") || strings.HasPrefix(trimmedUpperInputData, "WITH") {
-		if len(source.BigQueryAllowedDatasets()) > 0 {
-			var connProps []*bigqueryapi.ConnectionProperty
-			session, err := source.BigQuerySession()(ctx)
-			if err != nil {
-				return nil, util.NewClientServerError("failed to get BigQuery session", http.StatusInternalServerError, err)
-			}
-			if session != nil {
-				connProps = []*bigqueryapi.ConnectionProperty{
-					{Key: "session_id", Value: session.ID},
-				}
-			}
+	isQuery := strings.HasPrefix(trimmedUpperInputData, "SELECT") || strings.HasPrefix(trimmedUpperInputData, "WITH")
 
-			dryRunJob, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, inputData, nil, connProps, source, source.GetMaximumBytesBilled(), false)
-			if validationErr != nil {
-				return nil, validationErr
-			}
-			if dryRunJob.Statistics.Query.StatementType != "SELECT" {
-				return nil, util.NewAgentError(fmt.Sprintf("the 'input_data' parameter only supports a table ID or a SELECT query. The provided query has statement type '%s'", dryRunJob.Statistics.Query.StatementType), nil)
-			}
-		}
-		inputDataSource = fmt.Sprintf("(%s)", inputData)
-	} else {
+	if !isQuery {
 		if !bqutil.ValidTableID(inputData) {
 			return nil, util.NewAgentError(fmt.Sprintf("invalid table identifier for 'input_data': %q; expected 'dataset.table' or 'project.dataset.table'", inputData), nil)
 		}
@@ -230,6 +210,33 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 		inputDataSource = fmt.Sprintf("SELECT * FROM `%s`", inputData)
 	}
 
+	session, err := source.BigQuerySession()(ctx)
+	if err != nil {
+		return nil, util.NewClientServerError("failed to get BigQuery session", http.StatusInternalServerError, err)
+	}
+	var connProps []*bigqueryapi.ConnectionProperty
+	if session != nil {
+		connProps = []*bigqueryapi.ConnectionProperty{
+			{Key: "session_id", Value: session.ID},
+		}
+	}
+
+	if isQuery {
+		// When input_data is a query, we perform a dry run on input_data first to validate
+		// that it is a SELECT statement and provide clear error messages before embedding it
+		// in the CREATE TEMP MODEL statement (which is also validated via dry run below).
+		if len(source.BigQueryAllowedDatasets()) > 0 {
+			dryRunJob, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, inputData, nil, connProps, source, source.GetMaximumBytesBilled(), false)
+			if validationErr != nil {
+				return nil, validationErr
+			}
+			if dryRunJob.Statistics.Query.StatementType != "SELECT" {
+				return nil, util.NewAgentError(fmt.Sprintf("the 'input_data' parameter only supports a table ID or a SELECT query. The provided query has statement type '%s'", dryRunJob.Statistics.Query.StatementType), nil)
+			}
+		}
+		inputDataSource = fmt.Sprintf("(%s)", inputData)
+	}
+
 	// Use temp model to skip the clean up at the end. To use TEMP MODEL, queries have to be
 	// in the same BigQuery session.
 	createModelSQL := fmt.Sprintf("CREATE TEMP MODEL %s OPTIONS(%s) AS %s",
@@ -241,24 +248,15 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 	createModelQuery := bqClient.Query(createModelSQL)
 	createModelQuery.Labels = map[string]string{"mcp-toolbox-tool": resourceType}
 
-	// Get session from provider if in protected mode.
-	// Otherwise, a new session will be created by the first query.
-	session, err := source.BigQuerySession()(ctx)
-	if err != nil {
-		return nil, util.NewClientServerError("failed to get BigQuery session", http.StatusInternalServerError, err)
-	}
-
 	if session != nil {
-		createModelQuery.ConnectionProperties = []*bigqueryapi.ConnectionProperty{
-			{Key: "session_id", Value: session.ID},
-		}
+		createModelQuery.ConnectionProperties = connProps
 	} else {
 		// If not in protected mode, create a session for this invocation.
 		createModelQuery.CreateSession = true
 	}
 
 	if len(source.BigQueryAllowedDatasets()) > 0 {
-		_, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, createModelSQL, nil, createModelQuery.ConnectionProperties, source, source.GetMaximumBytesBilled(), true)
+		_, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, createModelSQL, nil, createModelQuery.ConnectionProperties, source, source.GetMaximumBytesBilled(), createModelQuery.CreateSession)
 		if validationErr != nil {
 			return nil, validationErr
 		}
@@ -289,9 +287,9 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 	}
 
 	getInsightsSQL := fmt.Sprintf("SELECT * FROM ML.GET_INSIGHTS(MODEL %s)", modelID)
-	connProps := []*bigqueryapi.ConnectionProperty{{Key: "session_id", Value: sessionID}}
+	insightsConnProps := []*bigqueryapi.ConnectionProperty{{Key: "session_id", Value: sessionID}}
 
-	resp, err := source.RunSQL(ctx, bqClient, getInsightsSQL, "SELECT", nil, connProps, map[string]string{"mcp-toolbox-tool": resourceType})
+	resp, err := source.RunSQL(ctx, bqClient, getInsightsSQL, "SELECT", nil, insightsConnProps, map[string]string{"mcp-toolbox-tool": resourceType})
 	if err != nil {
 		return nil, util.ProcessGcpError(err)
 	}

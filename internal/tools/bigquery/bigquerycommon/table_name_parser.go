@@ -16,6 +16,7 @@ package bigquerycommon
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -72,6 +73,21 @@ var datasetLevelInformationSchemaViews = map[string]bool{
 	"table_snapshots":         true,
 }
 
+// stmtBoundaryTokens are the tokens that can immediately precede the first
+// keyword of a statement. A CALL in any of these positions is a procedure
+// invocation, not a column or table named "call".
+var stmtBoundaryTokens = map[string]bool{
+	"": true, "begin": true, "then": true, "else": true, "do": true, "loop": true,
+}
+
+// createModifiers are tokens that may appear between CREATE and the object type,
+// e.g. CREATE OR REPLACE TEMP TABLE FUNCTION f().
+var createModifiers = map[string]bool{
+	"or": true, "replace": true, "temp": true, "temporary": true,
+	"if": true, "not": true, "exists": true, "table": true,
+	"aggregate": true, "external": true, "materialized": true,
+}
+
 var tableFollowsKeywords = map[string]bool{
 	"from":   true,
 	"join":   true,
@@ -117,6 +133,30 @@ var schemaOperationVerbs = map[string]bool{
 	verbDrop:   true,
 }
 
+var nonAliasKeywords = map[string]bool{
+	// Join keywords & modifiers
+	"inner": true, "outer": true, "left": true, "right": true, "full": true, "cross": true, "join": true, "natural": true,
+	// Query clauses & operators
+	"where": true, "group": true, "order": true, "having": true, "limit": true, "offset": true,
+	"window": true, "qualify": true, "union": true, "intersect": true, "except": true,
+	"on": true, "using": true, "set": true, "when": true, "then": true, "else": true, "end": true, "case": true,
+	"for": true, "system_time": true, "of": true, "tablesample": true, "pivot": true, "unpivot": true,
+	"unnest": true, "asc": true, "desc": true, "nulls": true, "first": true, "last": true,
+	"all": true, "distinct": true, "by": true, "and": true, "or": true, "not": true, "in": true, "is": true,
+	// Data types
+	"int64": true, "int": true, "smallint": true, "integer": true, "bigint": true, "tinyint": true, "byteint": true,
+	"numeric": true, "bignumeric": true, "decimal": true, "bigdecimal": true,
+	"float64": true, "string": true, "bytes": true, "bool": true, "boolean": true,
+	"date": true, "datetime": true, "time": true, "timestamp": true, "interval": true,
+	"geography": true, "json": true, "array": true, "struct": true,
+}
+
+func isReservedNonTableToken(k string) bool {
+	return tableContextExitKeywords[k] || tableFollowsKeywords[k] || nonAliasKeywords[k] || k == "select" || k == "with"
+}
+
+const maxParseDepth = 64
+
 // hasPrefix checks if the runes starting at offset match the given prefix.
 func hasPrefix(r []rune, offset int, prefix string) bool {
 	if offset+len(prefix) > len(r) {
@@ -151,47 +191,80 @@ func hasPrefixFold(r []rune, offset int, prefix string) bool {
 	return true
 }
 
-// TableParser parses a SQL query and returns a list of table IDs that it references.
-// It is intended as a conservative fallback for when a dry run cannot be performed or analyzed.
-func TableParser(sql, defaultProjectID string) ([]string, error) {
+// ParseResult holds the outcome of a lexical scan of a query.
+type ParseResult struct {
+	// TableIDs are fully-qualified project.dataset.table references found in the query.
+	TableIDs []string
+	// UnqualifiedRefs are single-part table references (e.g. `FROM my_table`) that are
+	// neither a CTE nor an alias. Their dataset can only be resolved at execution time
+	// (via the session's default dataset), so they cannot be statically validated.
+	UnqualifiedRefs []string
+}
+
+// TableParserDetailed parses a SQL query and returns both fully-qualified table IDs and
+// single-part unqualified table references found in the query.
+func TableParserDetailed(sql, defaultProjectID string) (ParseResult, error) {
 	tableIDSet := make(map[string]struct{})
-	visitedSQLs := make(map[string]struct{})
+	unqualifiedCandidates := make(map[string]struct{})
 	aliases := make(map[string]struct{})
-	if _, err := parseSQL(sql, defaultProjectID, tableIDSet, visitedSQLs, aliases, false); err != nil {
-		return nil, err
+	cteNames := make(map[string]struct{})
+	runes := []rune(sql)
+
+	if _, err := parseSQL(runes, defaultProjectID, tableIDSet, unqualifiedCandidates, aliases, cteNames, false, 0); err != nil {
+		return ParseResult{}, err
 	}
 
 	tableIDs := make([]string, 0, len(tableIDSet))
 	for id := range tableIDSet {
-		isAlias := false
-		parts := strings.Split(id, ".")
-		for j := 0; j < len(parts); j++ {
-			suffix := strings.ToLower(strings.Join(parts[j:], "."))
-			if _, ok := aliases[suffix]; ok {
-				isAlias = true
-				break
-			}
-		}
-		if !isAlias {
-			tableIDs = append(tableIDs, id)
+		tableIDs = append(tableIDs, id)
+	}
+	sort.Strings(tableIDs)
+
+	unqualifiedRefs := make([]string, 0, len(unqualifiedCandidates))
+	for ref := range unqualifiedCandidates {
+		if _, ok := aliases[ref]; !ok {
+			unqualifiedRefs = append(unqualifiedRefs, ref)
 		}
 	}
-	return tableIDs, nil
+	sort.Strings(unqualifiedRefs)
+
+	return ParseResult{
+		TableIDs:        tableIDs,
+		UnqualifiedRefs: unqualifiedRefs,
+	}, nil
+}
+
+// TableParser parses a SQL query and returns a list of table IDs that it references.
+// It is intended as a conservative fallback for when a dry run cannot be performed or analyzed.
+func TableParser(sql, defaultProjectID string) ([]string, error) {
+	res, err := TableParserDetailed(sql, defaultProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return res.TableIDs, nil
 }
 
 // parseSQL is the core recursive function that processes SQL strings.
-// It uses a state machine to find table names and recursively parse EXECUTE IMMEDIATE.
-func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visitedSQLs map[string]struct{}, aliases map[string]struct{}, inSubquery bool) (int, error) {
-	// Prevent infinite recursion.
-	if _, ok := visitedSQLs[sql]; ok {
-		return len(sql), nil
+// It uses a state machine to find table names, unqualified references, and check statement safety.
+func parseSQL(
+	runes []rune,
+	defaultProjectID string,
+	tableIDSet map[string]struct{},
+	unqualifiedCandidates map[string]struct{},
+	aliases map[string]struct{},
+	cteNames map[string]struct{},
+	inSubquery bool,
+	depth int,
+) (int, error) {
+	if depth > maxParseDepth {
+		return 0, fmt.Errorf("query nesting is too deep to analyze safely (max %d levels)", maxParseDepth)
 	}
-	visitedSQLs[sql] = struct{}{}
 
 	state := stateNormal
 	expectingTable, expectingAlias, expectingCTE := false, false, false
+	pendingCreate := false
+	caseDepth := 0
 	var lastTableKeyword, lastToken, statementVerb string
-	runes := []rune(sql)
 
 	for i := 0; i < len(runes); {
 		char := runes[i]
@@ -226,7 +299,7 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 			}
 			if char == '(' {
 				if expectingTable || expectingCTE || lastToken == "as" {
-					consumed, err := parseSQL(string(runes[i+1:]), defaultProjectID, tableIDSet, visitedSQLs, aliases, true)
+					consumed, err := parseSQL(runes[i+1:], defaultProjectID, tableIDSet, unqualifiedCandidates, aliases, cteNames, true, depth+1)
 					if err != nil {
 						return 0, err
 					}
@@ -247,9 +320,12 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 			if char == ';' {
 				statementVerb = ""
 				lastToken = ""
+				lastTableKeyword = ""
 				expectingTable = false
 				expectingAlias = false
 				expectingCTE = false
+				pendingCreate = false
+				caseDepth = 0
 				i++
 				continue
 			}
@@ -343,32 +419,51 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 				if keyword == "immediate" && lastToken == "execute" {
 					return 0, fmt.Errorf("EXECUTE IMMEDIATE is not allowed when dataset restrictions are in place")
 				}
-				if (lastToken == "create" || lastToken == "create or" || lastToken == "create or replace") &&
-					(keyword == "procedure" || keyword == "function" || keyword == "table function") {
-					tokenToReport := strings.ToUpper(lastToken)
-					if tokenToReport == "" {
-						tokenToReport = "CREATE"
+				if keyword == "create" {
+					pendingCreate = true
+				} else if pendingCreate {
+					if keyword == "procedure" || keyword == "function" {
+						kind := "CREATE " + strings.ToUpper(keyword)
+						if keyword == "function" && lastToken == "table" {
+							kind = "CREATE TABLE FUNCTION"
+						}
+						return 0, fmt.Errorf("unanalyzable statements like '%s' are not allowed", kind)
 					}
-					return 0, fmt.Errorf("unanalyzable statements like '%s %s' are not allowed", tokenToReport, strings.ToUpper(keyword))
-				}
-				if keyword == "call" {
-					return 0, fmt.Errorf("CALL is not allowed when dataset restrictions are in place")
-				}
-				if schemaOperationVerbs[statementVerb] &&
-					(keyword == "schema" || keyword == "dataset") {
-					return 0, fmt.Errorf("dataset-level operations like '%s %s' are not allowed", strings.ToUpper(statementVerb), strings.ToUpper(keyword))
+					if !createModifiers[keyword] {
+						pendingCreate = false
+					}
 				}
 
-				if lastToken == "execute" && keyword == "immediate" {
-					// Found EXECUTE IMMEDIATE. The first expression must be the SQL string.
-					// Search for the next string literal.
-					sqlConsumed, err := findAndParseSQLString(runes[i+consumed:], defaultProjectID, tableIDSet, visitedSQLs, aliases)
-					if err != nil {
-						return 0, err
+				if keyword == "case" {
+					caseDepth++
+				} else if keyword == "end" && caseDepth > 0 {
+					caseDepth--
+				}
+
+				isBoundary := stmtBoundaryTokens[lastToken]
+				if caseDepth > 0 && (lastToken == "then" || lastToken == "else") {
+					isBoundary = false
+				}
+				if keyword == "call" && isBoundary {
+					return 0, fmt.Errorf("CALL is not allowed when dataset restrictions are in place")
+				}
+
+				prev := lastToken
+				if prev == "create or" || prev == "create or replace" {
+					prev = verbCreate
+				}
+				if schemaOperationVerbs[prev] && (keyword == "schema" || keyword == "dataset") {
+					return 0, fmt.Errorf("dataset-level operations like '%s %s' are not allowed", strings.ToUpper(prev), strings.ToUpper(keyword))
+				}
+
+				if len(parts) == 1 && keyword == "set" && (statementVerb == "" || statementVerb == "set") {
+					nextIdx := i + consumed
+					for nextIdx < len(runes) && (unicode.IsSpace(runes[nextIdx]) || runes[nextIdx] == '\n' || runes[nextIdx] == '\r' || runes[nextIdx] == '\t') {
+						nextIdx++
 					}
-					i += consumed + sqlConsumed
-					lastToken = "execute immediate"
-					continue
+					if hasPrefix(runes, nextIdx, "@@") {
+						return 0, fmt.Errorf("session variable assignment ('SET @@') is not allowed when dataset restrictions are in place")
+					}
 				}
 
 				// Resolve aliases and identify table references.
@@ -377,21 +472,26 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 					isKnownAlias = true
 				}
 				if !isKnownAlias && len(parts) > 1 {
-					if _, ok := aliases[strings.ToLower(parts[0])]; ok {
-						isKnownAlias = true
+					// Only CTE names shadow multi-part references.
+					for j := 1; j < len(parts); j++ {
+						prefix := strings.ToLower(strings.Join(parts[:j], "."))
+						if _, ok := cteNames[prefix]; ok {
+							isKnownAlias = true
+							break
+						}
 					}
 				}
 
 				if expectingCTE {
+					cteNames[fullID] = struct{}{}
 					aliases[fullID] = struct{}{}
-					aliases[strings.ToLower(parts[0])] = struct{}{}
 					expectingCTE = false
 				} else if expectingAlias {
-					if len(parts) == 1 && (tableContextExitKeywords[keyword] || tableFollowsKeywords[keyword] || keyword == "select" || keyword == "with") {
+					if len(parts) == 1 && (tableContextExitKeywords[keyword] || tableFollowsKeywords[keyword] ||
+						nonAliasKeywords[keyword] || keyword == "select" || keyword == "with") {
 						expectingAlias = false
 					} else {
 						aliases[fullID] = struct{}{}
-						aliases[strings.ToLower(parts[0])] = struct{}{}
 						expectingAlias = false
 						isKnownAlias = true
 					}
@@ -421,6 +521,8 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 								tableIDSet[tableID] = struct{}{}
 							}
 						}
+					} else if len(parts) == 1 && !isReservedNonTableToken(keyword) {
+						unqualifiedCandidates[strings.ToLower(parts[0])] = struct{}{}
 					}
 					// For most keywords, we expect only one table.
 					if lastTableKeyword != "from" {
@@ -428,6 +530,7 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 					}
 					expectingAlias = true
 				}
+
 				if len(parts) == 1 {
 					if keyword == "with" {
 						expectingCTE = true
@@ -542,72 +645,20 @@ func parseSQL(sql, defaultProjectID string, tableIDSet map[string]struct{}, visi
 	return len(runes), nil
 }
 
-// findAndParseSQLString scans for the first string literal and parses its content as SQL.
-func findAndParseSQLString(runes []rune, defaultProjectID string, tableIDSet map[string]struct{}, visitedSQLs map[string]struct{}, aliases map[string]struct{}) (int, error) {
-	for i := 0; i < len(runes); {
-		if hasPrefix(runes, i, "'''") {
-			end := indexRunes(runes[i+3:], "'''")
-			if end != -1 {
-				sqlContent := string(runes[i+3 : i+3+end])
-				if _, err := parseSQL(sqlContent, defaultProjectID, tableIDSet, visitedSQLs, aliases, false); err != nil {
-					return 0, err
-				}
-				return i + 3 + end + 3, nil
-			}
-		}
-		if hasPrefix(runes, i, `"""`) {
-			end := indexRunes(runes[i+3:], `"""`)
-			if end != -1 {
-				sqlContent := string(runes[i+3 : i+3+end])
-				if _, err := parseSQL(sqlContent, defaultProjectID, tableIDSet, visitedSQLs, aliases, false); err != nil {
-					return 0, err
-				}
-				return i + 3 + end + 3, nil
-			}
-		}
-		if runes[i] == '\'' {
-			// Find end of single-quoted string, respecting backslash escapes.
-			for j := i + 1; j < len(runes); j++ {
-				if runes[j] == '\\' {
-					j++
-					continue
-				}
-				if runes[j] == '\'' {
-					sqlContent := string(runes[i+1 : j])
-					if _, err := parseSQL(sqlContent, defaultProjectID, tableIDSet, visitedSQLs, aliases, false); err != nil {
-						return 0, err
-					}
-					return j + 1, nil
-				}
-			}
-		}
-		if runes[i] == '"' {
-			for j := i + 1; j < len(runes); j++ {
-				if runes[j] == '\\' {
-					j++
-					continue
-				}
-				if runes[j] == '"' {
-					sqlContent := string(runes[i+1 : j])
-					if _, err := parseSQL(sqlContent, defaultProjectID, tableIDSet, visitedSQLs, aliases, false); err != nil {
-						return 0, err
-					}
-					return j + 1, nil
-				}
-			}
-		}
-		i++
-	}
-	return len(runes), nil
-}
-
 // IsAnyTableExplicitlyReferenced performs a lexical audit of the SQL to see if any of the target tables
 // are explicitly named as identifiers. It correctly ignores names inside comments or strings.
 func IsAnyTableExplicitlyReferenced(sql, defaultProjectID string, targetTableIDs []string) (bool, error) {
-	targets := make(map[string]struct{})
-	for _, id := range targetTableIDs {
-		targets[strings.ToLower(id)] = struct{}{}
+	type targetInfo struct {
+		cleanTarget string
 	}
+	targets := make([]targetInfo, 0, len(targetTableIDs))
+	for _, id := range targetTableIDs {
+		lower := strings.ToLower(id)
+		targets = append(targets, targetInfo{
+			cleanTarget: strings.ReplaceAll(lower, "`", ""),
+		})
+	}
+	cleanDefaultProjectID := strings.ReplaceAll(strings.ToLower(defaultProjectID), "`", "")
 
 	runes := []rune(sql)
 	state := stateNormal
@@ -631,38 +682,6 @@ func IsAnyTableExplicitlyReferenced(sql, defaultProjectID string, targetTableIDs
 				state = stateInMultiLineComment
 				i += 2
 				continue
-			}
-
-			if unicode.IsLetter(char) || char == '`' || char == '_' {
-				parts, consumed, err := parseIdentifierSequence(runes[i:])
-				if err != nil {
-					return false, err
-				}
-				if consumed > 0 {
-					fullID := strings.ToLower(strings.Join(parts, "."))
-					for target := range targets {
-						// Exact match or as a prefix for column references.
-						if fullID == target || strings.HasPrefix(fullID, target+".") {
-							return true, nil
-						}
-						// Match without any backticks.
-						cleanFullID := strings.ReplaceAll(fullID, "`", "")
-						cleanTarget := strings.ReplaceAll(target, "`", "")
-						if cleanFullID == cleanTarget || strings.HasPrefix(cleanFullID, cleanTarget+".") {
-							return true, nil
-						}
-						// Try matching with the default project ID prefix.
-						if defaultProjectID != "" {
-							cleanDefaultProjectID := strings.ReplaceAll(strings.ToLower(defaultProjectID), "`", "")
-							withDefault := cleanDefaultProjectID + "." + cleanFullID
-							if withDefault == cleanTarget || strings.HasPrefix(withDefault, cleanTarget+".") {
-								return true, nil
-							}
-						}
-					}
-					i += consumed
-					continue
-				}
 			}
 
 			// Handle various BigQuery string literal formats.
@@ -705,6 +724,32 @@ func IsAnyTableExplicitlyReferenced(sql, defaultProjectID string, targetTableIDs
 				state = stateInDoubleQuoteString
 				i++
 				continue
+			}
+
+			if unicode.IsLetter(char) || char == '`' || char == '_' {
+				parts, consumed, err := parseIdentifierSequence(runes[i:])
+				if err != nil {
+					return false, err
+				}
+				if consumed > 0 {
+					fullID := strings.ToLower(strings.Join(parts, "."))
+					for _, target := range targets {
+						cleanTarget := target.cleanTarget
+						// Exact match or as a prefix for column references.
+						if fullID == cleanTarget || strings.HasPrefix(fullID, cleanTarget+".") {
+							return true, nil
+						}
+						// Try matching with the default project ID prefix.
+						if cleanDefaultProjectID != "" {
+							withDefault := cleanDefaultProjectID + "." + fullID
+							if withDefault == cleanTarget || strings.HasPrefix(withDefault, cleanTarget+".") {
+								return true, nil
+							}
+						}
+					}
+					i += consumed
+					continue
+				}
 			}
 
 		case stateInSingleQuoteString:

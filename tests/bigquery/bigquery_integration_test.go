@@ -36,7 +36,6 @@ import (
 	"github.com/googleapis/mcp-toolbox/tests"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/googleapi"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -89,9 +88,9 @@ func TestBigQueryToolEndpoints(t *testing.T) {
 	}
 
 	// create table name with UUID
-	datasetName := fmt.Sprintf("temp_toolbox_test_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
+	datasetName := fmt.Sprintf("temp_toolbox_test_%s", uniqueID)
 
-	cleanupDatasets := ensureTeardownDatasets(ctx, client, datasetName)
+	cleanupDatasets := ensureTeardownDatasets(client, datasetName)
 	defer cleanupDatasets(t)
 
 	tableName := fmt.Sprintf("param_table_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
@@ -126,11 +125,6 @@ func TestBigQueryToolEndpoints(t *testing.T) {
 		datasetName,
 		uniqueID,
 	)
-
-	// global cleanup for this test run
-	t.Cleanup(func() {
-		CleanupBigQueryDatasets(t, context.Background(), client, []string{datasetName})
-	})
 
 	// set up data for param tool
 	createParamTableStmt, insertParamTableStmt, paramToolStmt, idParamToolStmt, nameParamToolStmt, arrayToolStmt, paramTestParams := getBigQueryParamToolInfo(tableNameParam)
@@ -240,12 +234,12 @@ func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
 	}
 
 	// Create two datasets, one allowed, one not.
-	baseName := strings.ReplaceAll(uuid.New().String(), "-", "")
+	baseName := uniqueID
 	allowedDatasetName1 := fmt.Sprintf("allowed_dataset_1_%s", baseName)
 	allowedDatasetName2 := fmt.Sprintf("allowed_dataset_2_%s", baseName)
 	disallowedDatasetName := fmt.Sprintf("disallowed_dataset_%s", baseName)
 
-	cleanupDatasets := ensureTeardownDatasets(ctx, client, allowedDatasetName1, allowedDatasetName2, disallowedDatasetName)
+	cleanupDatasets := ensureTeardownDatasets(client, allowedDatasetName1, allowedDatasetName2, disallowedDatasetName)
 	defer cleanupDatasets(t)
 
 	allowedTableName1 := "allowed_table_1"
@@ -258,11 +252,6 @@ func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
 	allowedAnalyzeContributionTableName1 := "allowed_analyze_contribution_table_1"
 	allowedAnalyzeContributionTableName2 := "allowed_analyze_contribution_table_2"
 	disallowedAnalyzeContributionTableName := "disallowed_analyze_contribution_table"
-
-	// global cleanup for this test run
-	t.Cleanup(func() {
-		CleanupBigQueryDatasets(t, context.Background(), client, []string{allowedDatasetName1, allowedDatasetName2, disallowedDatasetName})
-	})
 
 	// Setup allowed table
 	allowedTableNameParam1 := fmt.Sprintf("`%s.%s.%s`", BigqueryProject, allowedDatasetName1, allowedTableName1)
@@ -312,6 +301,7 @@ func TestBigQueryToolWithDatasetRestriction(t *testing.T) {
 
 	// Create Forecast views
 	for _, dsName := range []string{allowedDatasetName1, allowedDatasetName2} {
+		// defers in this loop are intended to run at function exit to ensure all views are deleted before dataset teardown (LIFO execution order).
 		teardownForecastView := setupBigQueryView(t, ctx, client, dsName, viewInAllowedPointingToDisallowedForecastName, fmt.Sprintf("SELECT * FROM %s", disallowedForecastTableFullName))
 		defer teardownForecastView(t)
 
@@ -692,7 +682,7 @@ func getBigQueryTmplToolStatement() (string, string) {
 	return tmplSelectCombined, tmplSelectFilterCombined
 }
 
-func ensureTeardownDatasets(ctx context.Context, client *bigqueryapi.Client, datasetNames ...string) func(*testing.T) {
+func ensureTeardownDatasets(client *bigqueryapi.Client, datasetNames ...string) func(*testing.T) {
 	return func(t *testing.T) {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
@@ -2861,31 +2851,43 @@ func runExecuteSqlWithRestriction(t *testing.T, allowedTableFullName, disallowed
 			name:           "disallowed create schema",
 			sql:            "CREATE SCHEMA another_dataset",
 			wantStatusCode: http.StatusOK,
-			wantInError:    "dataset-level operations like 'CREATE SCHEMA' are not allowed",
+			wantInError:    "dataset-level operations like 'CREATE_SCHEMA' are not allowed",
 		},
 		{
 			name:           "disallowed alter schema",
 			sql:            fmt.Sprintf("ALTER SCHEMA %s SET OPTIONS(description='new one')", allowedDatasetID),
 			wantStatusCode: http.StatusOK,
-			wantInError:    "dataset-level operations like 'ALTER SCHEMA' are not allowed",
+			wantInError:    "dataset-level operations like 'ALTER_SCHEMA' are not allowed",
 		},
 		{
 			name:           "disallowed create function",
 			sql:            fmt.Sprintf("CREATE FUNCTION %s.my_func() RETURNS INT64 AS (1)", allowedDatasetID),
 			wantStatusCode: http.StatusOK,
-			wantInError:    "unanalyzable statements like 'CREATE FUNCTION' are not allowed",
+			wantInError:    "creating stored routines ('CREATE_FUNCTION') is not allowed",
 		},
 		{
 			name:           "disallowed create procedure",
 			sql:            fmt.Sprintf("CREATE PROCEDURE %s.my_proc() BEGIN SELECT 1; END", allowedDatasetID),
 			wantStatusCode: http.StatusOK,
-			wantInError:    "unanalyzable statements like 'CREATE PROCEDURE' are not allowed",
+			wantInError:    "creating stored routines ('CREATE_PROCEDURE') is not allowed",
+		},
+		{
+			name:           "disallowed create table function",
+			sql:            fmt.Sprintf("CREATE TABLE FUNCTION %s.my_tvf() AS (SELECT 1 AS x)", allowedDatasetID),
+			wantStatusCode: http.StatusOK,
+			wantInError:    "creating stored routines ('CREATE_TABLE_FUNCTION') is not allowed",
 		},
 		{
 			name:           "disallowed execute immediate",
 			sql:            "EXECUTE IMMEDIATE 'SELECT 1'",
 			wantStatusCode: http.StatusOK,
 			wantInError:    "EXECUTE IMMEDIATE is not allowed",
+		},
+		{
+			name:           "disallowed session variable assignment",
+			sql:            "SET @@dataset_id = 'disallowed_ds'",
+			wantStatusCode: http.StatusOK,
+			wantInError:    "session variable assignment",
 		},
 	}
 
@@ -3308,44 +3310,4 @@ func getBigQueryVectorSearchStmts(vectorTableName string) (string, string) {
 	insertStmt := fmt.Sprintf("INSERT INTO %s (id, content, embedding) VALUES (1, @content, @text_to_embed)", vectorTableName)
 	searchStmt := fmt.Sprintf("SELECT id, content, ML.DISTANCE(embedding, @query, 'COSINE') AS distance FROM %s ORDER BY distance LIMIT 1", vectorTableName)
 	return insertStmt, searchStmt
-}
-
-func CleanupBigQueryDatasets(t *testing.T, ctx context.Context, client *bigqueryapi.Client, datasetIDs []string) {
-	for _, id := range datasetIDs {
-		t.Logf("INTEGRATION CLEANUP: Purging dataset %s", id)
-		ds := client.Dataset(id)
-
-		// Delete tables first since Dataset.Delete fails if not empty
-		tableIt := ds.Tables(ctx)
-		for {
-			table, err := tableIt.Next()
-			if err == iterator.Done {
-				break
-			}
-			if err != nil {
-				if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
-					t.Logf("INTEGRATION CLEANUP: Dataset %s already deleted (during table iteration)", id)
-					break
-				}
-				t.Errorf("INTEGRATION CLEANUP: Failed to iterate tables in %s: %v", id, err)
-				break
-			}
-			if err := table.Delete(ctx); err != nil {
-				if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
-					continue
-				}
-				t.Errorf("INTEGRATION CLEANUP: Failed to delete table %s: %v", table.TableID, err)
-			}
-		}
-		// delete empty dataset
-		if err := ds.Delete(ctx); err != nil {
-			if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == 404 {
-				t.Logf("INTEGRATION CLEANUP: Dataset %s already deleted", id)
-			} else {
-				t.Errorf("INTEGRATION CLEANUP: Failed to delete dataset %s: %v", id, err)
-			}
-		} else {
-			t.Logf("INTEGRATION CLEANUP SUCCESS: Wiped dataset %s", id)
-		}
-	}
 }
