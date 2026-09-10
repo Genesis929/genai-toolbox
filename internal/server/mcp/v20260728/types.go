@@ -118,7 +118,9 @@ type ResultMetaObject struct {
 // client can define its own, additional capabilities.
 type ClientCapabilities struct {
 	// Experimental, non-standard capabilities that the client supports.
-	Experimental map[string]interface{} `json:"experimental,omitempty"`
+	Experimental map[string]any `json:"experimental,omitempty"`
+	// Standard extensions that the client supports.
+	Extensions map[string]any `json:"extensions,omitempty"`
 	// Present if the client supports listing roots.
 	Roots *ListChanged `json:"roots,omitempty"`
 	// Present if the client supports sampling from an LLM.
@@ -185,8 +187,9 @@ type Implementation struct {
 // capabilities are defined here, in this schema, but this is not a closed set: any
 // server can define its own, additional capabilities.
 type ServerCapabilities struct {
-	Tools   *ListChanged `json:"tools,omitempty"`
-	Prompts *ListChanged `json:"prompts,omitempty"`
+	Extensions map[string]any `json:"extensions,omitempty"`
+	Tools      *ListChanged   `json:"tools,omitempty"`
+	Prompts    *ListChanged   `json:"prompts,omitempty"`
 }
 
 // ListChange represents whether the server supports notification for changes to the capabilities.
@@ -305,7 +308,8 @@ type Tool struct {
 	 */
 	Description string `json:"description,omitempty"`
 	// A JSON Schema object defining the expected parameters for the tool.
-	ToolInputSchema InputSchema `json:"inputSchema,omitempty"`
+	ToolInputSchema   InputSchema  `json:"inputSchema,omitempty"`
+	SecureInputSchema *InputSchema `json:"secureInputSchema,omitempty"`
 	// Optional additional tool information.
 	Annotations *ToolAnnotations `json:"annotations,omitempty"`
 	// See [General fields: `_meta`](/specification/2025-11-25/basic/index#_meta) for notes on `_meta` usage.
@@ -335,6 +339,10 @@ type CallToolRequestParams struct {
 	 * Arguments to use for the tool call.
 	 */
 	Arguments map[string]any `json:"arguments,omitempty"`
+	/**
+	 * Secure arguments to use for the tool call.
+	 */
+	SecureArguments map[string]any `json:"secureArguments,omitempty"`
 }
 
 // The sender or recipient of messages and data in a conversation.
@@ -501,9 +509,11 @@ type PromptMessage struct {
 /* Groups */
 
 // ListGroupsRequest is sent from the client to request the list of groups the
-// server has.
+// server has. It is not paginated: a server configures a bounded set of groups,
+// so groups/list always returns all of them in one response.
 type ListGroupsRequest struct {
-	PaginatedRequest
+	jsonrpc.Request
+	Params RequestParams `json:"params,omitempty"`
 }
 
 // Group is a single entry in a groups/list response.
@@ -514,7 +524,7 @@ type Group struct {
 
 // ListGroupsResult is the server's response to a groups/list request.
 type ListGroupsResult struct {
-	jsonrpc.Result
+	Result
 	Groups []Group `json:"groups"`
 }
 
@@ -534,7 +544,8 @@ type GetGroupRequestParams struct {
 // tools and prompts. The description is intentionally omitted; it is exposed only
 // through groups/list.
 type GetGroupResult struct {
-	jsonrpc.Result
+	Result
+	CacheableResult
 	Name    string   `json:"name"`
 	Tools   []Tool   `json:"tools"`
 	Prompts []Prompt `json:"prompts"`

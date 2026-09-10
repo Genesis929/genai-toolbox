@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"cloud.google.com/go/bigtable"
 	"github.com/google/go-cmp/cmp"
@@ -31,6 +32,7 @@ import (
 	"github.com/googleapis/mcp-toolbox/internal/testutils"
 	"github.com/googleapis/mcp-toolbox/internal/util/parameters"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/testcontainers/testcontainers-go"
 )
 
 // GetToolsConfig returns a mock tools config file
@@ -153,6 +155,25 @@ func GetToolsConfig(sourceConfig map[string]any, toolType, paramToolStatement, i
 				"statement":   "SELECT 1",
 				"authRequired": []string{
 					"my-google-auth",
+				},
+			},
+			"my-secure-tool": map[string]any{
+				"type":        toolType,
+				"source":      "my-instance",
+				"description": "Tool to test secure parameters.",
+				"statement":   paramToolStatement,
+				"parameters": []any{
+					map[string]any{
+						"name":        "id",
+						"type":        "integer",
+						"description": "user ID",
+					},
+					map[string]any{
+						"name":        "name",
+						"type":        "string",
+						"description": "user name",
+						"secure":      true,
+					},
 				},
 			},
 			"my-fail-tool": map[string]any{
@@ -684,7 +705,7 @@ func SetupPostgresSQLTable(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 
 	return func(t *testing.T) {
 		// tear down test
-		_, err = pool.Exec(ctx, fmt.Sprintf("DROP TABLE %s;", tableName))
+		_, err = pool.Exec(context.WithoutCancel(ctx), fmt.Sprintf("DROP TABLE %s;", tableName))
 		if err != nil {
 			t.Errorf("Teardown failed: %s", err)
 		}
@@ -713,7 +734,7 @@ func SetupMsSQLTable(t *testing.T, ctx context.Context, pool *sql.DB, createStat
 
 	return func(t *testing.T) {
 		// tear down test
-		_, err = pool.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s;", tableName))
+		_, err = pool.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("DROP TABLE %s;", tableName))
 		if err != nil {
 			t.Errorf("Teardown failed: %s", err)
 		}
@@ -742,7 +763,7 @@ func SetupMySQLTable(t *testing.T, ctx context.Context, pool *sql.DB, createStat
 
 	return func(t *testing.T) {
 		// tear down test
-		_, err = pool.ExecContext(ctx, fmt.Sprintf("DROP TABLE %s;", tableName))
+		_, err = pool.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("DROP TABLE %s;", tableName))
 		if err != nil {
 			t.Errorf("Teardown failed: %s", err)
 		}
@@ -859,6 +880,25 @@ func GetRedisValkeyToolsConfig(sourceConfig map[string]any, toolType string) map
 								"field": "email",
 							},
 						},
+					},
+				},
+			},
+			"my-secure-tool": map[string]any{
+				"type":        toolType,
+				"source":      "my-instance",
+				"description": "Tool to test secure parameters.",
+				"commands":    [][]string{{"HGETALL", "row1"}, {"HGETALL", "row3"}},
+				"parameters": []any{
+					map[string]any{
+						"name":        "id",
+						"type":        "integer",
+						"description": "user ID",
+					},
+					map[string]any{
+						"name":        "name",
+						"type":        "string",
+						"description": "user name",
+						"secure":      true,
 					},
 				},
 			},
@@ -1107,4 +1147,39 @@ func CleanupBigtableTables(t *testing.T, ctx context.Context, adminClient *bigta
 			}
 		}
 	}
+}
+
+// SetupPostgresTestContainer spins up a generic PostgreSQL-compatible test container.
+func SetupGenericPostgresTestContainer(ctx context.Context, t *testing.T, req testcontainers.ContainerRequest) (string, string, func()) {
+	t.Helper()
+
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		t.Fatalf("failed to start postgres container: %s", err)
+	}
+
+	cleanup := func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cleanupCancel()
+		if err := container.Terminate(cleanupCtx); err != nil {
+			t.Fatalf("failed to terminate container: %s", err)
+		}
+	}
+
+	host, err := container.Host(ctx)
+	if err != nil {
+		cleanup()
+		t.Fatalf("failed to get container host: %s", err)
+	}
+
+	mappedPort, err := container.MappedPort(ctx, "5432")
+	if err != nil {
+		cleanup()
+		t.Fatalf("failed to get container mapped port: %s", err)
+	}
+
+	return host, mappedPort.Port(), cleanup
 }

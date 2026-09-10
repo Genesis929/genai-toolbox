@@ -471,20 +471,24 @@ func TestMcpEndpoint(t *testing.T) {
 	defer ts.Close()
 
 	versTestCases := []struct {
-		name                      string
-		protocol                  string
-		idHeader                  bool
-		reqHeader                 []string
-		initWant                  map[string]any
-		invalidMethods            []string
-		meta                      map[string]any
-		wantToolsList             map[string]any
-		wantPromptsList           map[string]any
-		wantPromptsGet            map[string]any
-		wantToolsListOnTool1      map[string]any
-		wantToolsCallOnTool1      map[string]any
-		wantToolsListWithURLParam map[string]any
-		wantToolsCallWithURLParam map[string]any
+		name                                   string
+		protocol                               string
+		idHeader                               bool
+		reqHeader                              []string
+		initWant                               map[string]any
+		invalidMethods                         []string
+		meta                                   map[string]any
+		wantToolsList                          map[string]any
+		wantPromptsList                        map[string]any
+		wantPromptsGet                         map[string]any
+		wantToolsListOnTool1                   map[string]any
+		wantToolsCallOnTool1                   map[string]any
+		wantToolsListWithURLParam              map[string]any
+		wantToolsCallWithURLParam              map[string]any
+		wantToolsCallWithURLParamOverrideError map[string]any
+		wantToolsCallWithParamError            map[string]any
+		wantGroupsList                         map[string]any
+		wantGroupsGet                          map[string]any
 	}{
 		{
 			name:     "version 2024-11-05",
@@ -503,7 +507,7 @@ func TestMcpEndpoint(t *testing.T) {
 				},
 			},
 
-			invalidMethods: []string{"server/discover"},
+			invalidMethods: []string{"server/discover", "groups/list", "groups/get"},
 		},
 		{
 			name:     "version 2025-03-26",
@@ -521,7 +525,7 @@ func TestMcpEndpoint(t *testing.T) {
 					"serverInfo": map[string]any{"name": serverName, "version": testutils.MockVersionString},
 				},
 			},
-			invalidMethods: []string{"server/discover"},
+			invalidMethods: []string{"server/discover", "groups/list", "groups/get"},
 		},
 		{
 			name:      "version 2025-06-18",
@@ -540,7 +544,7 @@ func TestMcpEndpoint(t *testing.T) {
 					"serverInfo": map[string]any{"name": serverName, "version": testutils.MockVersionString},
 				},
 			},
-			invalidMethods: []string{"server/discover"},
+			invalidMethods: []string{"server/discover", "groups/list", "groups/get"},
 		},
 		{
 			name:      "version 2025-11-25",
@@ -559,7 +563,7 @@ func TestMcpEndpoint(t *testing.T) {
 					"serverInfo": map[string]any{"name": serverName, "version": testutils.MockVersionString},
 				},
 			},
-			invalidMethods: []string{"server/discover"},
+			invalidMethods: []string{"server/discover", "groups/list", "groups/get"},
 		},
 		{
 			name:           "version 2026-07-28",
@@ -779,6 +783,60 @@ func TestMcpEndpoint(t *testing.T) {
 					},
 				},
 			},
+			wantToolsCallWithURLParamOverrideError: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "tools-call-url-binding-override",
+				"result": map[string]any{
+					"resultType": "complete",
+					"content": []any{
+						map[string]any{
+							"type": "text",
+							"text": `parameter "param1" is bound by URL and cannot be provided in client arguments`,
+						},
+					},
+					"isError": true,
+					"_meta": map[string]any{
+						"io.modelcontextprotocol/serverInfo": map[string]any{"name": serverName, "version": testutils.MockVersionString},
+					},
+				},
+			},
+			wantToolsCallWithParamError: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "tools-call-param-error",
+				"result": map[string]any{
+					"resultType": "complete",
+					"content": []any{
+						map[string]any{
+							"type": "text",
+							"text": `provided parameters were invalid: parameter "param1" is required`,
+						},
+					},
+					"isError": true,
+					"_meta": map[string]any{
+						"io.modelcontextprotocol/serverInfo": map[string]any{"name": serverName, "version": testutils.MockVersionString},
+					},
+				},
+			},
+			// This version's `meta` declares no extensions, so the groups
+			// methods are reachable but refused. The served path needs a client
+			// that declares com.google.cloud/toolbox.v1 and is covered by
+			// TestMcpGroupsMethods.
+			wantGroupsList: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "groups-list",
+				"error": map[string]any{
+					"code":    -32021.0,
+					"message": `missing required client capability: method "groups/list" requires com.google.cloud/toolbox.v1 extension which is not supported by the client`,
+				},
+			},
+			wantGroupsGet: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "groups-get",
+				"error": map[string]any{
+					"code":    -32021.0,
+					"message": `missing required client capability: method "groups/get" requires com.google.cloud/toolbox.v1 extension which is not supported by the client`,
+				},
+			},
 		},
 	}
 	for _, vtc := range versTestCases {
@@ -847,6 +905,9 @@ func TestMcpEndpoint(t *testing.T) {
 							"resultType":        "complete",
 							"supportedVersions": []any{"2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"},
 							"capabilities": map[string]any{
+								"extensions": map[string]any{
+									"com.google.cloud/toolbox.v1": map[string]any{},
+								},
 								"tools":   map[string]any{"listChanged": false},
 								"prompts": map[string]any{"listChanged": false},
 							},
@@ -1301,6 +1362,102 @@ func TestMcpEndpoint(t *testing.T) {
 					},
 					wantOverwrite: vtc.wantToolsCallWithURLParam,
 				},
+				{
+					name: "tools/call with URL param override returns error",
+					url:  "/?param1=bound-string&param2=42&param3=true&param4=3.14&param6=%5B%22a%22%2C%22b%22%5D&param7=%7B%22k%22%3A%22v%22%7D",
+					body: jsonrpc.JSONRPCRequest{
+						Jsonrpc: jsonrpcVersion,
+						Id:      "tools-call-url-binding-override",
+						Request: jsonrpc.Request{
+							Method: "tools/call",
+						},
+						Params: map[string]any{
+							"name": "url_binding_tool",
+							"arguments": map[string]any{
+								"param1": "client-override",
+								"param5": "unbound-value",
+							},
+						},
+					},
+					methodName:     "tools/call",
+					wantStatusCode: http.StatusOK,
+					want: map[string]any{
+						"jsonrpc": "2.0",
+						"id":      "tools-call-url-binding-override",
+						"result": map[string]any{
+							"content": []any{
+								map[string]any{
+									"type": "text",
+									"text": `parameter "param1" is bound by URL and cannot be provided in client arguments`,
+								},
+							},
+							"isError": true,
+						},
+					},
+					wantOverwrite: vtc.wantToolsCallWithURLParamOverrideError,
+				},
+				{
+					name: "tools/call with insufficient parameters returns tool error",
+					url:  "/",
+					body: jsonrpc.JSONRPCRequest{
+						Jsonrpc: jsonrpcVersion,
+						Id:      "tools-call-param-error",
+						Request: jsonrpc.Request{
+							Method: "tools/call",
+						},
+						Params: map[string]any{
+							"name":      "some_params",
+							"arguments": map[string]any{},
+						},
+					},
+					methodName:     "tools/call",
+					wantStatusCode: http.StatusOK,
+					want: map[string]any{
+						"jsonrpc": "2.0",
+						"id":      "tools-call-param-error",
+						"result": map[string]any{
+							"content": []any{
+								map[string]any{
+									"type": "text",
+									"text": `provided parameters were invalid: parameter "param1" is required`,
+								},
+							},
+							"isError": true,
+						},
+					},
+					wantOverwrite: vtc.wantToolsCallWithParamError,
+				},
+				{
+					name: "groups/list",
+					url:  "/",
+					body: jsonrpc.JSONRPCRequest{
+						Jsonrpc: jsonrpcVersion,
+						Id:      "groups-list",
+						Request: jsonrpc.Request{
+							Method: "groups/list",
+						},
+					},
+					methodName:     "groups/list",
+					wantStatusCode: http.StatusOK,
+					wantOverwrite:  vtc.wantGroupsList,
+				},
+				{
+					name: "groups/get",
+					url:  "/",
+					body: jsonrpc.JSONRPCRequest{
+						Jsonrpc: jsonrpcVersion,
+						Id:      "groups-get",
+						Request: jsonrpc.Request{
+							Method: "groups/get",
+						},
+						Params: map[string]any{
+							"name": "tool1_only",
+						},
+					},
+					methodName:     "groups/get",
+					wantStatusCode: http.StatusOK,
+					wantOverwrite:  vtc.wantGroupsGet,
+				},
 			}
 			for i := range testCases {
 				tc := *testCases[i]
@@ -1316,7 +1473,7 @@ func TestMcpEndpoint(t *testing.T) {
 					if slices.Contains(vtc.reqHeader, "Mcp-Method") {
 						header["Mcp-Method"] = tc.methodName
 					}
-					if slices.Contains(vtc.reqHeader, "Mcp-Name") && (tc.methodName == "tools/call" || tc.methodName == "prompts/get") {
+					if slices.Contains(vtc.reqHeader, "Mcp-Name") && (tc.methodName == "tools/call" || tc.methodName == "prompts/get" || tc.methodName == "groups/get") {
 						params := tc.body.Params.(map[string]any)
 						header["Mcp-Name"] = params["name"].(string)
 					}
@@ -1379,6 +1536,114 @@ func TestMcpEndpoint(t *testing.T) {
 						}
 					}
 				})
+			}
+		})
+	}
+}
+
+// TestMcpGroupsMethods checks that groups/list and groups/get are served to a
+// client that declared the com.google.cloud/toolbox.v1 extension. The refusal
+// paths — an earlier protocol version, and 2026-07-28 without the extension —
+// are covered by TestMcpEndpoint, whose per-version `meta` declares no
+// extensions.
+func TestMcpGroupsMethods(t *testing.T) {
+	mockTools := []testutils.MockTool{testutils.MockTool1, testutils.MockTool2}
+	toolsMap, promptsMap, groups := testutils.SetUpResources(t, mockTools, nil)
+	r, shutdown := setUpServer(t, "mcp", toolsMap, promptsMap, groups)
+	defer shutdown()
+	ts := runServer(r, false)
+	defer ts.Close()
+
+	meta := map[string]any{
+		"io.modelcontextprotocol/protocolVersion": protocolVersion20260728,
+		"io.modelcontextprotocol/clientInfo": map[string]any{
+			"version": "client-temp-version",
+			"name":    "client-name",
+		},
+		"io.modelcontextprotocol/clientCapabilities": map[string]any{
+			"extensions": map[string]any{"com.google.cloud/toolbox.v1": map[string]any{}},
+		},
+	}
+	serverInfoMeta := map[string]any{
+		"io.modelcontextprotocol/serverInfo": map[string]any{"name": serverName, "version": testutils.MockVersionString},
+	}
+
+	testCases := []struct {
+		name   string
+		method string
+		params map[string]any
+		want   map[string]any
+	}{
+		{
+			name:   "groups/list with extension",
+			method: "groups/list",
+			params: map[string]any{"_meta": meta},
+			want: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "groups-req",
+				"result": map[string]any{
+					"resultType": "complete",
+					"groups": []any{
+						map[string]any{"name": "tool1_only"},
+						map[string]any{"name": "tool2_only"},
+					},
+					"_meta": serverInfoMeta,
+				},
+			},
+		},
+		{
+			name:   "groups/get with extension",
+			method: "groups/get",
+			params: map[string]any{"name": "tool1_only", "_meta": meta},
+			want: map[string]any{
+				"jsonrpc": "2.0",
+				"id":      "groups-req",
+				"result": map[string]any{
+					"resultType": "complete",
+					"name":       "tool1_only",
+					"tools": []any{
+						map[string]any{"name": "no_params", "inputSchema": basicInputSchema},
+					},
+					"prompts":    []any{},
+					"ttlMs":      300000.0,
+					"cacheScope": "public",
+					"_meta":      serverInfoMeta,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := jsonrpc.JSONRPCRequest{
+				Jsonrpc: jsonrpcVersion,
+				Id:      "groups-req",
+				Request: jsonrpc.Request{Method: tc.method},
+				Params:  tc.params,
+			}
+			reqMarshal, err := json.Marshal(body)
+			if err != nil {
+				t.Fatalf("unexpected error during marshaling of body: %s", err)
+			}
+
+			header := map[string]string{
+				"Mcp-Protocol-Version": protocolVersion20260728,
+				"Mcp-Method":           tc.method,
+			}
+			if tc.method == "groups/get" {
+				header["Mcp-Name"] = tc.params["name"].(string)
+			}
+
+			_, respBody, err := runRequest(ts, http.MethodPost, "/", bytes.NewBuffer(reqMarshal), header)
+			if err != nil {
+				t.Fatalf("unexpected error during request: %s", err)
+			}
+			var got map[string]any
+			if err := json.Unmarshal(respBody, &got); err != nil {
+				t.Fatalf("unexpected error unmarshalling body: %s", err)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("unexpected response: got %#v, want %#v", got, tc.want)
 			}
 		})
 	}
@@ -1730,6 +1995,70 @@ func runSseRequest(ts *httptest.Server, path string, proto string) (*http.Respon
 		return nil, fmt.Errorf("unable to send request: %w", err)
 	}
 	return resp, nil
+}
+
+// nonFlusherResponseWriter is an http.ResponseWriter that deliberately does not
+// implement http.Flusher, used to exercise sseHandler's missing-flusher path.
+type nonFlusherResponseWriter struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (w *nonFlusherResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *nonFlusherResponseWriter) Write(b []byte) (int, error) { return w.body.Write(b) }
+
+func (w *nonFlusherResponseWriter) WriteHeader(status int) { w.status = status }
+
+// TestSseHandlerWriterWithoutFlusher checks that when the ResponseWriter does
+// not implement http.Flusher, sseHandler reports a clean 500 instead of falling
+// through and dereferencing a nil flusher.
+func TestSseHandlerWriterWithoutFlusher(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	testLogger, err := log.NewStdLogger(os.Stderr, os.Stderr, "warn")
+	if err != nil {
+		t.Fatalf("unable to initialize logger: %s", err)
+	}
+
+	otelShutdown, err := telemetry.SetupOTel(ctx, testutils.MockVersionString, "", false, "", "toolbox")
+	if err != nil {
+		t.Fatalf("unable to setup otel: %s", err)
+	}
+	defer func() {
+		if err := otelShutdown(ctx); err != nil {
+			t.Fatalf("error shutting down OpenTelemetry: %s", err)
+		}
+	}()
+
+	instrumentation, err := telemetry.CreateTelemetryInstrumentation(testutils.MockVersionString)
+	if err != nil {
+		t.Fatalf("unable to create custom metrics: %s", err)
+	}
+
+	server := &Server{
+		version:         testutils.MockVersionString,
+		logger:          testLogger,
+		instrumentation: instrumentation,
+		sseManager:      newSseManager(ctx),
+		PrimitiveMgr:    primitives.NewPrimitiveManager(nil, nil, nil, nil, nil, nil),
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/sse", nil).WithContext(ctx)
+	w := &nonFlusherResponseWriter{}
+
+	sseHandler(server, w, req)
+
+	if w.status != http.StatusInternalServerError {
+		t.Fatalf("expected status %d for a writer without a flusher, got %d", http.StatusInternalServerError, w.status)
+	}
 }
 
 func TestStdioSession(t *testing.T) {
