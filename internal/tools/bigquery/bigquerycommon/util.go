@@ -134,28 +134,28 @@ type tableReference struct {
 // Why custom SQL parsing (TableParserDetailed & IsAnyTableExplicitlyReferenced) is needed
 // alongside BigQuery dry run statistics:
 //
-// 1. Supporting Authorized Views:
-//    When a query accesses an Authorized View (e.g. `SELECT * FROM allowed_ds.my_view`),
-//    BigQuery's dry run resolves the view and includes ALL underlying base tables in
-//    Statistics.Query.ReferencedTables, even if they reside in restricted datasets
-//    (e.g. `restricted_ds.base_table`). If we relied solely on dry run statistics, queries
-//    against legitimate authorized views would be erroneously blocked.
-//    To distinguish legitimate authorized view access from unauthorized direct access:
-//      - If a restricted dataset appears in dry run statistics, IsAnyTableExplicitlyReferenced
-//        performs a lexical scan of the SQL to check whether the restricted table is
-//        explicitly referenced by name in the query text.
-//      - If the user explicitly typed the restricted table name, the query is blocked.
-//      - If the restricted table was NOT named in the query (and all other references are
-//        fully qualified), the access is via an authorized view and is granted exemption.
+//  1. Supporting Authorized Views:
+//     When a query accesses an Authorized View (e.g. `SELECT * FROM allowed_ds.my_view`),
+//     BigQuery's dry run resolves the view and includes ALL underlying base tables in
+//     Statistics.Query.ReferencedTables, even if they reside in restricted datasets
+//     (e.g. `restricted_ds.base_table`). If we relied solely on dry run statistics, queries
+//     against legitimate authorized views would be erroneously blocked.
+//     To distinguish legitimate authorized view access from unauthorized direct access:
+//     - If a restricted dataset appears in dry run statistics, IsAnyTableExplicitlyReferenced
+//     performs a lexical scan of the SQL to check whether the restricted table is
+//     explicitly referenced by name in the query text.
+//     - If the user explicitly typed the restricted table name, the query is blocked.
+//     - If the restricted table was NOT named in the query (and all other references are
+//     fully qualified), the access is via an authorized view and is granted exemption.
 //
-// 2. Catching Unanalyzable or Ambiguous Operations:
-//    Dry run statistics alone cannot detect every security boundary issue:
-//      - Unqualified table references (e.g. `SELECT * FROM my_table`): In the presence of
-//        dataset restrictions, table names must be fully qualified (dataset.table) to prevent
-//        accidental or ambiguous resolution based on session state or search paths.
-//        TableParserDetailed detects unqualified references.
-//      - Procedural operations (SET session variables, CALL, etc.) whose dynamic behavior
-//        cannot be safely analyzed.
+//  2. Catching Unanalyzable or Ambiguous Operations:
+//     Dry run statistics alone cannot detect every security boundary issue:
+//     - Unqualified table references (e.g. `SELECT * FROM my_table`): In the presence of
+//     dataset restrictions, table names must be fully qualified (dataset.table) to prevent
+//     accidental or ambiguous resolution based on session state or search paths.
+//     TableParserDetailed detects unqualified references.
+//     - Procedural operations (SET session variables, CALL, etc.) whose dynamic behavior
+//     cannot be safely analyzed.
 func ValidateQueryAgainstAllowedDatasets(
 	ctx context.Context,
 	restService *bigqueryrestapi.Service,
