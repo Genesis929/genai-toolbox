@@ -267,16 +267,28 @@ func mergeExtras(extras, pageExtras map[string]json.RawMessage) {
 	}
 }
 
-// concatJSONArrays joins two JSON arrays, falling back to `next` when either
-// value is missing or is not an array.
+// concatJSONArrays joins two JSON arrays. When the values cannot be merged it
+// keeps whichever side holds real data: a non-array `prev` is overwritten by
+// `next` (last page wins for scalars), while an unmergeable `next` leaves the
+// already aggregated `prev` untouched so earlier pages are never dropped.
 func concatJSONArrays(prev, next json.RawMessage) json.RawMessage {
-	var prevItems, nextItems []json.RawMessage
-	if len(prev) == 0 || json.Unmarshal(prev, &prevItems) != nil || json.Unmarshal(next, &nextItems) != nil {
+	if len(prev) == 0 {
 		return next
+	}
+	if len(next) == 0 {
+		return prev
+	}
+	var prevItems, nextItems []json.RawMessage
+	if json.Unmarshal(prev, &prevItems) != nil || prevItems == nil {
+		return next
+	}
+	if json.Unmarshal(next, &nextItems) != nil || nextItems == nil {
+		// Keep what was aggregated so far instead of discarding earlier pages.
+		return prev
 	}
 	merged, err := json.Marshal(append(prevItems, nextItems...))
 	if err != nil {
-		return next
+		return prev
 	}
 	return merged
 }

@@ -379,6 +379,35 @@ func TestListAccessibleDataAgentsDrainMergesRepeatedUnknownFields(t *testing.T) 
 	}
 }
 
+// concatJSONArrays must never trade an aggregated list for a value it cannot
+// merge: an earlier page's entries are worth more than one unmergeable page.
+func TestConcatJSONArrays(t *testing.T) {
+	for _, tc := range []struct {
+		desc string
+		prev json.RawMessage
+		next json.RawMessage
+		want json.RawMessage
+	}{
+		{desc: "no prev", prev: nil, next: json.RawMessage(`["a"]`), want: json.RawMessage(`["a"]`)},
+		{desc: "both arrays", prev: json.RawMessage(`["a"]`), next: json.RawMessage(`["b"]`), want: json.RawMessage(`["a","b"]`)},
+		{desc: "null next keeps prev", prev: json.RawMessage(`["a"]`), next: json.RawMessage(`null`), want: json.RawMessage(`["a"]`)},
+		{desc: "null prev loses to scalar next", prev: json.RawMessage(`null`), next: json.RawMessage(`2`), want: json.RawMessage(`2`)},
+		{desc: "null prev loses to empty array next", prev: json.RawMessage(`null`), next: json.RawMessage(`[]`), want: json.RawMessage(`[]`)},
+		{desc: "scalar prev loses to next", prev: json.RawMessage(`1`), next: json.RawMessage(`2`), want: json.RawMessage(`2`)},
+		{desc: "scalar prev kept when next is empty", prev: json.RawMessage(`1`), next: nil, want: json.RawMessage(`1`)},
+		{desc: "scalar next keeps aggregated prev", prev: json.RawMessage(`["a","b"]`), next: json.RawMessage(`1`), want: json.RawMessage(`["a","b"]`)},
+		{desc: "object next keeps aggregated prev", prev: json.RawMessage(`["a"]`), next: json.RawMessage(`{"x":1}`), want: json.RawMessage(`["a"]`)},
+		{desc: "empty next keeps prev", prev: json.RawMessage(`["a"]`), next: nil, want: json.RawMessage(`["a"]`)},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			got := concatJSONArrays(tc.prev, tc.next)
+			if diff := cmp.Diff(string(tc.want), string(got)); diff != "" {
+				t.Errorf("concatJSONArrays(%s, %s) diff %v", tc.prev, tc.next, diff)
+			}
+		})
+	}
+}
+
 func TestParseDataAgentsPageRejectsWrongFieldTypes(t *testing.T) {
 	for _, tc := range []struct {
 		desc string
