@@ -36,17 +36,17 @@ layer of security by controlling which datasets can be accessed:
   GoogleSQL query.
 - **With `allowedDatasets` restriction:** Before execution, the tool performs a
   dry run to analyze the query. It will reject the query if it explicitly
-  references any table outside the allowed `datasets` list.
+  references any table outside `allowedDatasets`.
 
   **Authorized views are supported.** If the dry run reports that the query
-  reads a table outside the allowed list, but that table is not named anywhere
+  reads a table outside `allowedDatasets`, but that table is not named anywhere
   in the SQL text, the access is treated as an
   [authorized view](https://cloud.google.com/bigquery/docs/authorized-views)
   and permitted. This lets you expose a curated view in an allowed dataset that
   reads from restricted source data. Note that all table names in the query
   must be fully qualified (`dataset.table` or `project.dataset.table`) to be
   eligible for authorized view exemptions, as unqualified table names resolved
-  via default datasets cannot be statically verified against the allowed list.
+  via default datasets cannot be statically verified against `allowedDatasets`.
 
   To keep the analysis sound, the following operations remain disallowed:
 
