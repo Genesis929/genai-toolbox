@@ -48,14 +48,13 @@ func newConfig(ctx context.Context, name string, decoder *yaml.Decoder) (tools.T
 }
 
 type compatibleSource interface {
-	BigQueryClient() *bigqueryapi.Client
 	UseClientAuthorization() bool
 	GetAuthTokenHeaderName() string
 	GetMaximumBytesBilled() int64
 	IsDatasetAllowed(projectID, datasetID string) bool
 	BigQueryAllowedDatasets() []string
 	BigQuerySession() bigqueryds.BigQuerySessionProvider
-	RetrieveClientAndService(tools.AccessToken) (*bigqueryapi.Client, *bigqueryrestapi.Service, error)
+	RetrieveClientAndService(context.Context, tools.AccessToken) (*bigqueryapi.Client, *bigqueryrestapi.Service, error)
 	RunSQL(context.Context, *bigqueryapi.Client, string, string, []bigqueryapi.QueryParameter, []*bigqueryapi.ConnectionProperty, map[string]string) (any, error)
 }
 
@@ -165,7 +164,7 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 		}
 	}
 
-	bqClient, restService, err := source.RetrieveClientAndService(accessToken)
+	bqClient, restService, err := source.RetrieveClientAndService(ctx, accessToken)
 	if err != nil {
 		return nil, util.NewClientServerError("failed to retrieve BigQuery client", http.StatusInternalServerError, err)
 	}
@@ -188,7 +187,7 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 		// that it is a SELECT statement and provide clear error messages before embedding it
 		// in the AI.FORECAST query (which is also validated via dry run below).
 		if len(source.BigQueryAllowedDatasets()) > 0 {
-			dryRunJob, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, historyData, nil, connProps, source, source.GetMaximumBytesBilled(), false)
+			dryRunJob, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, bqClient.Project(), bqClient.Location, historyData, nil, connProps, source, source.GetMaximumBytesBilled(), false)
 			if validationErr != nil {
 				return nil, validationErr
 			}
@@ -210,7 +209,7 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 				projectID = parts[0]
 				datasetID = parts[1]
 			case 2: // dataset.table
-				projectID = source.BigQueryClient().Project()
+				projectID = bqClient.Project()
 				datasetID = parts[0]
 			default:
 				return nil, util.NewAgentError(fmt.Sprintf("invalid table ID format for 'history_data': %q. Expected 'dataset.table' or 'project.dataset.table'", historyData), nil)
@@ -237,7 +236,7 @@ func (t Tool) Invoke(ctx context.Context, s sources.Source, params parameters.Pa
 		historyDataSource, dataCol, timestampCol, horizon, idColsArg)
 
 	if len(source.BigQueryAllowedDatasets()) > 0 {
-		_, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, source.BigQueryClient().Project(), source.BigQueryClient().Location, sql, nil, connProps, source, source.GetMaximumBytesBilled(), false)
+		_, validationErr := bqutil.ValidateQueryAgainstAllowedDatasets(ctx, restService, bqClient.Project(), bqClient.Location, sql, nil, connProps, source, source.GetMaximumBytesBilled(), false)
 		if validationErr != nil {
 			return nil, validationErr
 		}
