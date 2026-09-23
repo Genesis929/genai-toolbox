@@ -38,10 +38,6 @@ type MockSource struct {
 	Session         *bigqueryds.Session
 }
 
-func (m *MockSource) BigQueryClient() *bigqueryapi.Client {
-	return m.Client
-}
-
 func (m *MockSource) UseClientAuthorization() bool {
 	return false
 }
