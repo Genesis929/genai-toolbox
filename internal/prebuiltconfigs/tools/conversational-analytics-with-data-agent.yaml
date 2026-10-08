@@ -17,7 +17,7 @@ name: conversational-analytics-source
 type: cloud-gemini-data-analytics
 projectId: ${CLOUD_GDA_PROJECT}
 useClientOAuth: ${CLOUD_GDA_USE_CLIENT_OAUTH:false}
-readOnly: ${CLOUD_GDA_READONLY:false}
+readOnly: ${CLOUD_GDA_READONLY:true}
 ---
 kind: tool
 name: list_accessible_data_agents

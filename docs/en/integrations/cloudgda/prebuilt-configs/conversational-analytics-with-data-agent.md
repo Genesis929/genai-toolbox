@@ -16,7 +16,7 @@ description: "Details of the Conversational Analytics with Data Agent prebuilt c
         to return. Defaults to `50`.
     *   `CLOUD_GDA_READONLY`: (Optional) When set to `true`, suppresses the
         write-capable tools (`create_data_agent`, `update_data_agent`, and
-        `delete_data_agent`). Default: `false`.
+        `delete_data_agent`). Set to `false` to enable them. Defaults to `true`.
 *   **Permissions:**
     *   **Gemini Data Analytics Stateless Chat User (Beta)** (`roles/geminidataanalytics.dataAgentStatelessUser`) to interact with the data agent.
     *   **Gemini Data Analytics Data Agent Creator / Owner** (`roles/geminidataanalytics.dataAgentCreator`, `roles/geminidataanalytics.dataAgentOwner`) to create, update, or delete data agents.

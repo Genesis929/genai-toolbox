@@ -152,12 +152,12 @@ func TestUpdateDataAgentAnnotations(t *testing.T) {
 		Source:     "my-instance",
 	}
 
-	t.Run("defaults to destructive annotations and is suppressed on a read-only source", func(t *testing.T) {
+	t.Run("defaults to write annotations and is suppressed on a read-only source", func(t *testing.T) {
 		tl, err := cfg.Initialize(ctx)
 		if err != nil {
 			t.Fatalf("unexpected Initialize error: %v", err)
 		}
-		if diff := cmp.Diff(tools.NewDestructiveAnnotations(), tl.GetAnnotations(nil)); diff != "" {
+		if diff := cmp.Diff(tools.NewWriteAnnotations(), tl.GetAnnotations(nil)); diff != "" {
 			t.Fatalf("unexpected default annotations (-want +got):\n%s", diff)
 		}
 		if !tools.ShouldSuppress(ctx, tl, &cloudgdads.Source{Config: cloudgdads.Config{ReadOnly: true}}) {

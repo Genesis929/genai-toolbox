@@ -2728,7 +2728,7 @@ func TestPrebuiltConversationalAnalyticsReadOnly(t *testing.T) {
 		value  string
 		want   bool
 	}{
-		{name: "unset defaults to false", want: false},
+		{name: "unset defaults to true", want: true},
 		{name: "true enables read-only mode", setEnv: true, value: "true", want: true},
 		{name: "false disables read-only mode", setEnv: true, value: "false", want: false},
 	}
